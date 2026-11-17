@@ -28,7 +28,7 @@ jobs:
         run: build\Release\CryptoTests.exe
 
       - name: Upload exe
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: PS5DirectView-windows-x64
           path: build/Release/PS5DirectView.exe
