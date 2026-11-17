@@ -1,0 +1,7 @@
+* text=auto
+*.bat text eol=crlf
+*.patch -text
+*.mp4 binary
+*.png binary
+*.ico binary
+third_party/** linguist-vendored

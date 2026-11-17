@@ -1,0 +1,20 @@
+--- a/lib/src/discovery.c
++++ b/lib/src/discovery.c
+@@ -152,6 +152,17 @@
+ 		return CHIAKI_ERR_NETWORK;
+ 	}
+ 
++#ifdef _WIN32
++	// DirectView: an ICMP "port unreachable" (e.g. the PS4 port 987 probed on a PS5) makes
++	// Windows fail the next recvfrom() with WSAECONNRESET, which ends the discovery thread
++	// before the PS5's reply on 9302 is read. Ignore those ICMP resets.
++	{
++		BOOL report_reset = FALSE;
++		DWORD returned = 0;
++		WSAIoctl(discovery->socket, _WSAIOW(IOC_VENDOR, 12) /* SIO_UDP_CONNRESET */, &report_reset, sizeof(report_reset), NULL, 0, &returned, NULL, NULL);
++	}
++#endif
++
+ 	// First try CHIAKI_DISCOVERY_PORT_LOCAL_MIN..<MAX, then 0 (random)
+ 	uint16_t port = CHIAKI_DISCOVERY_PORT_LOCAL_MIN;
+ 	int r;

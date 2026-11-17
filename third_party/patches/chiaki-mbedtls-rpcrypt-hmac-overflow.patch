@@ -1,0 +1,14 @@
+--- a/lib/src/rpcrypt.c
++++ b/lib/src/rpcrypt.c
+@@ -2271,7 +2271,10 @@
+ 	buf[CHIAKI_RPCRYPT_KEY_SIZE + 6] = (uint8_t)((counter >> 0x08) & 0xff);
+ 	buf[CHIAKI_RPCRYPT_KEY_SIZE + 7] = (uint8_t)((counter >> 0x00) & 0xff);
+ 
+-	uint8_t hmac[CHIAKI_RPCRYPT_KEY_SIZE];
++	// DirectView: mbedtls_md_hmac_finish() writes the full SHA-256 digest (32 bytes);
++	// upstream used a 16-byte buffer here, overrunning the stack (MSVC /GS aborts).
++	// Only the first CHIAKI_RPCRYPT_KEY_SIZE bytes are used, as before.
++	uint8_t hmac[32];
+ 	unsigned int hmac_len = 0;
+ 
+ 

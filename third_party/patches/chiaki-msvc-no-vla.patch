@@ -1,0 +1,42 @@
+--- a/lib/src/ctrl.c
++++ b/lib/src/ctrl.c
+@@ -724,7 +724,7 @@
+ 	if(ctrl->session->rudp)
+ 	{
+ 		uint8_t buf_size = 8 + payload_size;
+-		uint8_t buf[buf_size];
++		uint8_t *buf = (uint8_t *)_alloca(buf_size); // DirectView: MSVC has no VLAs
+ 		memcpy(buf, header, 8);
+ 		if(enc)
+ 			memcpy(buf + 8, enc, payload_size);
+@@ -1224,7 +1224,7 @@
+ 			goto error;
+ 		}
+ 		size_t init_response_size = message.data_size - 8;
+-		uint8_t init_response[init_response_size];
++		uint8_t *init_response = (uint8_t *)_alloca(init_response_size); // DirectView: MSVC has no VLAs
+ 		memcpy(init_response, message.data + 8, init_response_size);
+ 		chiaki_rudp_message_pointers_free(&message);
+ 		err = chiaki_rudp_send_recv(session->rudp, &message, init_response, init_response_size, 0, COOKIE_REQUEST, COOKIE_RESPONSE, 2, 3);
+--- a/lib/src/regist.c
++++ b/lib/src/regist.c
+@@ -288,7 +288,7 @@
+ 			goto fail;
+ 		}
+ 		size_t init_response_size = message.data_size - 8;
+-		uint8_t init_response[init_response_size];
++		uint8_t *init_response = (uint8_t *)_alloca(init_response_size); // DirectView: MSVC has no VLAs
+ 		memcpy(init_response, message.data + 8, init_response_size);
+ 		chiaki_rudp_message_pointers_free(&message);
+ 		err = chiaki_rudp_send_recv(regist->info.rudp, &message, init_response, init_response_size, 0, COOKIE_REQUEST, COOKIE_RESPONSE, 2, 3);
+--- a/lib/src/session.c
++++ b/lib/src/session.c
+@@ -772,7 +772,7 @@
+ 			return err;
+ 		}
+ 		size_t init_response_size = message.data_size - 8;
+-		uint8_t init_response[init_response_size];
++		uint8_t *init_response = (uint8_t *)_alloca(init_response_size); // DirectView: MSVC has no VLAs
+ 		memcpy(init_response, message.data + 8, init_response_size);
+ 		chiaki_rudp_message_pointers_free(&message);
+ 		err = chiaki_rudp_send_recv(session->rudp, &message, init_response, init_response_size, 0, COOKIE_REQUEST, COOKIE_RESPONSE, 2, 3);

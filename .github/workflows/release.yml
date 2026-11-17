@@ -1,0 +1,45 @@
+name: Release
+
+# Push a tag like v1.1.0 and this builds, tests and publishes a zip.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release --parallel --target PS5DirectView InputTests CryptoTests
+
+      - name: Test
+        run: |
+          build\Release\InputTests.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          build\Release\CryptoTests.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Package
+        run: |
+          $name = "PS5DirectView-${{ github.ref_name }}-windows-x64"
+          New-Item -ItemType Directory $name | Out-Null
+          Copy-Item build\Release\PS5DirectView.exe, README.md, LICENSE $name
+          Copy-Item third_party\README.md "$name\THIRD_PARTY.md"
+          Copy-Item test-1080p60.mp4 $name
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $name = "PS5DirectView-${{ github.ref_name }}-windows-x64"
+          gh release create "${{ github.ref_name }}" "$name.zip" "$name.zip.sha256" --title "${{ github.ref_name }}" --generate-notes
