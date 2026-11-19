@@ -1,5 +1,6 @@
 #include "Ui.h"
 
+#ifdef _WIN32
 #include "MouseTranslator.h"
 
 #include <wincodec.h>
@@ -1169,3 +1170,5 @@ void Ui::AssignBinding(Settings& settings, InputCode code) {
     listenAction_ = -1;
     events_.push_back({UiCommand::InputChanged});
 }
+
+#endif // _WIN32

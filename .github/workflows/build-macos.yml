@@ -1,0 +1,62 @@
+name: Build macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          cmake --version
+          clang --version
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure (universal arm64 + x86_64)
+        run: >
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build app
+        run: cmake --build build --parallel
+
+      - name: Build tests
+        run: cmake --build build --target InputTests CryptoTests --parallel
+
+      - name: Input tests
+        run: ./build/InputTests
+
+      - name: Crypto tests
+        run: ./build/CryptoTests
+
+      - name: Check bundle layout
+        run: |
+          ls -la "build/PS5DirectView.app/Contents"
+          ls -la "build/PS5DirectView.app/Contents/MacOS"
+          file "build/PS5DirectView.app/Contents/MacOS/PS5DirectView"
+
+      - name: Create zipped artifact
+        run: |
+          cd build
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent \
+            "PS5DirectView.app" "PS5DirectView-macos-universal.zip"
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: PS5DirectView-macos-universal
+          path: build/PS5DirectView-macos-universal.zip
+          if-no-files-found: error

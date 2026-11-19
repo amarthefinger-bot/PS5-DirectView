@@ -1,25 +1,28 @@
 #pragma once
 
 #include "Capture.h"
-#include <windows.h>
-#include <d2d1_1.h>
-#include <d3d11.h>
+
 #include <functional>
-#include <dxgi1_5.h>
-#include <mfapi.h>
-#include <wrl/client.h>
+#include <memory>
+
+#ifdef _WIN32
+  #include <windows.h>
+  #include <d2d1_1.h>
+  #include <d3d11.h>
+  #include <dxgi1_5.h>
+  #include <mfapi.h>
+  #include <wrl/client.h>
+#endif
+
+#ifdef _WIN32
 
 class D3DRenderer {
 public:
     void Initialize(HWND window);
     void Resize(unsigned width, unsigned height);
     void ResetVideo();
-    // Uploads the frame's planes, converts to RGB on the GPU, and presents.
     void Render(const VideoFrame& frame);
-    // Re-presents the last converted frame (window resize, V-Sync toggle).
     void Redraw();
-    // UI/overlay layer drawn with Direct2D into the same back buffer, right
-    // before Present. Coordinates are DIPs; videoRect is where video landed.
     using OverlayFn = std::function<void(ID2D1DeviceContext*, const D2D1_RECT_F& videoRect)>;
     void SetOverlay(OverlayFn fn) { overlay_ = std::move(fn); }
     ID2D1DeviceContext* D2D() const { return d2d_.Get(); }
@@ -29,12 +32,9 @@ public:
     void SetVSync(bool enabled) { vsync_ = enabled; }
     bool VSync() const { return vsync_; }
     bool TearingSupported() const { return allowTearing_; }
-    // Shared with Media Foundation so hardware decoders output on this GPU.
     IMFDXGIDeviceManager* DeviceManager() const { return deviceManager_.Get(); }
-    // 0 = auto (from stream), 1 = force full range, 2 = force limited range.
     void SetRangeOverride(int mode) { rangeOverride_ = mode; paramsDirty_ = true; }
     int RangeOverride() const { return rangeOverride_; }
-    // 0 = off .. 1 = strongest contrast-adaptive sharpening.
     void SetSharpness(float amount) { sharpness_ = amount; paramsDirty_ = true; }
     float Sharpness() const { return sharpness_; }
 
@@ -83,19 +83,59 @@ private:
     float dpi_ = 96.0f;
     UINT deviceManagerToken_ = 0;
 
-    // GPU path: copy of the hardware decoder's output surface.
     Microsoft::WRL::ComPtr<ID3D11Texture2D> gpuFrame_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> gpuView0_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> gpuView1_;
     D3D11_TEXTURE2D_DESC gpuDesc_{};
 
-    // Raw capture planes (CPU-writable).
     Microsoft::WRL::ComPtr<ID3D11Texture2D> plane0_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> plane0View_;
     Microsoft::WRL::ComPtr<ID3D11Texture2D> plane1_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> plane1View_;
-    // Converted RGB image at source resolution, scaled to the window on present.
     Microsoft::WRL::ComPtr<ID3D11Texture2D> rgbTexture_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> rgbTarget_;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> rgbView_;
 };
+
+#else
+
+// macOS renderer: Metal-backed. Opaque pimpl; `MetalView` is set by Ui_Mac.
+class D3DRenderer {
+public:
+    // Takes an NSView* (actually MTKView*). Bridged as void* for header purity.
+    void Initialize(void* metalView);
+    void Resize(unsigned width, unsigned height);
+    void ResetVideo();
+    void Render(const VideoFrame& frame);
+    void Redraw();
+
+    // Mac overlay: free-form draw callback into a CoreGraphics context
+    // layered over the Metal swap chain. (See Renderer_Mac.mm for size.)
+    struct Rect { float left, top, right, bottom; };
+    using OverlayFn = std::function<void(void* cgContext, const Rect& videoRect)>;
+    void SetOverlay(OverlayFn fn) { overlay_ = std::move(fn); }
+
+    void SetDpi(float dpi) { dpi_ = dpi; }
+    float Dpi() const { return dpi_; }
+    bool HasImage() const { return hasImage_; }
+    void SetVSync(bool enabled) { vsync_ = enabled; }
+    bool VSync() const { return vsync_; }
+    bool TearingSupported() const { return false; }
+    void SetRangeOverride(int mode) { rangeOverride_ = mode; }
+    int RangeOverride() const { return rangeOverride_; }
+    void SetSharpness(float amount) { sharpness_ = amount; }
+    float Sharpness() const { return sharpness_; }
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    OverlayFn overlay_;
+    float dpi_ = 96.0f;
+    bool hasImage_ = false;
+    bool vsync_ = true;
+    int rangeOverride_ = 0;
+    float sharpness_ = 0.5f;
+    friend struct Impl;
+};
+
+#endif

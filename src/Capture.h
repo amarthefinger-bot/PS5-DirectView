@@ -1,54 +1,80 @@
 #pragma once
 
-#include <windows.h>
-#include <mfobjects.h>
-#include <mfapi.h>
-#include <mfidl.h>
-#include <wrl/client.h>
-
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
+#ifdef _WIN32
+  #include <windows.h>
+  #include <mfobjects.h>
+  #include <mfapi.h>
+  #include <mfidl.h>
+  #include <wrl/client.h>
+#endif
+
 struct VideoDevice {
+#ifdef _WIN32
     std::wstring name;
     std::wstring symbolicLink;
+#else
+    std::string name;         // AVCaptureDevice localizedName
+    std::string symbolicLink; // AVCaptureDevice uniqueID
+#endif
 };
 
-// Requires COM and MFStartup on the calling thread before enumeration.
 std::vector<VideoDevice> EnumerateVideoDevices();
 
-// Pixel layouts the renderer can consume directly. YUY2/NV12 are converted to
-// RGB on the GPU, so Media Foundation never runs a CPU color converter.
 enum class PixelFormat { BGRA, YUY2, NV12 };
 
 struct FrameFormat {
     PixelFormat pixel = PixelFormat::BGRA;
     unsigned width = 0;
-    unsigned height = 0;    // visible rows (after display-aperture crop)
-    unsigned codedHeight = 0; // allocated rows; NV12 chroma starts after these
-    long stride = 0;        // Bytes per row of plane 0; negative = bottom-up (BGRA only).
+    unsigned height = 0;
+    unsigned codedHeight = 0;
+    long stride = 0;
     double fps = 0.0;
-    bool bt709 = true;      // YUV matrix: BT.709 (HD) or BT.601 (SD / JPEG).
-    bool fullRange = false; // YUV range: 0-255 (JPEG) or 16-235 (video).
+    bool bt709 = true;
+    bool fullRange = false;
 };
 
+#ifdef _WIN32
+
 struct VideoFrame {
-    // Keeps a GPU decoder surface out of the decoder's pool until uploaded.
     Microsoft::WRL::ComPtr<IMFSample> sample;
-    // Either a system-memory buffer or an IMFDXGIBuffer (GPU texture).
     Microsoft::WRL::ComPtr<IMFMediaBuffer> buffer;
     FrameFormat format;
-    LONGLONG sampleTime = 0;  // driver capture time, QPC 100 ns; 0 = unknown
-    LONGLONG receiveTime = 0; // when the app received it, same clock
+    LONGLONG sampleTime = 0;
+    LONGLONG receiveTime = 0;
     std::uint64_t sequence = 0;
 };
 
-// One mailbox slot, not a queue: producer overwrites old images, so the
-// display always shows the newest frame and never builds a backlog.
+#else
+
+// macOS: a CVPixelBuffer held via void* (bridge-retained by Capture_Mac.mm).
+struct VideoFrame {
+    void* pixelBuffer = nullptr;   // CVPixelBufferRef, retained
+    FrameFormat format;
+    std::uint64_t sampleTime = 0;  // host time, mach_absolute_time ns
+    std::uint64_t receiveTime = 0;
+    std::uint64_t sequence = 0;
+
+    VideoFrame() = default;
+    ~VideoFrame();
+    VideoFrame(const VideoFrame&) = delete;
+    VideoFrame& operator=(const VideoFrame&) = delete;
+    VideoFrame(VideoFrame&& other) noexcept;
+    VideoFrame& operator=(VideoFrame&& other) noexcept;
+    void Reset();
+};
+
+#endif
+
 class LatestFrame {
 public:
     void Publish(VideoFrame&& frame);
@@ -61,6 +87,8 @@ private:
     std::uint64_t nextSequence_ = 0;
 };
 
+#ifdef _WIN32
+
 class CaptureService {
 public:
     explicit CaptureService(HANDLE frameEvent);
@@ -68,14 +96,11 @@ public:
     CaptureService(const CaptureService&) = delete;
     CaptureService& operator=(const CaptureService&) = delete;
 
-    // With a device manager, MJPEG is decoded by the GPU's hardware decoder
-    // and frames stay in video memory. Without one, the CPU path is used.
     void SetDeviceManager(IMFDXGIDeviceManager* manager) { deviceManager_ = manager; }
     void Start(std::wstring deviceSymbolicLink);
     void Stop();
     bool TryConsume(VideoFrame& out) { return latest_.Consume(out); }
     std::wstring Status() const;
-    // Short format summary for the UI, e.g. "1920x1080 · 60 fps · NV12 · GPU".
     std::wstring Signal() const;
     std::uint64_t FramesReceived() const { return framesReceived_.load(); }
     bool Running() const { return running_.load(); }
@@ -86,7 +111,7 @@ private:
     void SetSignal(const std::wstring& value);
     std::wstring signal_;
 
-    HANDLE frameEvent_ = nullptr; // Owned by the app.
+    HANDLE frameEvent_ = nullptr;
     Microsoft::WRL::ComPtr<IMFDXGIDeviceManager> deviceManager_;
     LatestFrame latest_;
     mutable std::mutex statusMutex_;
@@ -96,3 +121,56 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> framesReceived_{0};
 };
+
+#else
+
+// macOS CaptureService: AVFoundation-backed. The sample-buffer delegate calls
+// FrameEvent::Signal() so the main thread can wake and consume the latest
+// frame; the window run loop pumps it via a 1 ms NSTimer in Ui_Mac.
+class CaptureService {
+public:
+    struct FrameEvent {
+        std::mutex m;
+        std::condition_variable cv;
+        bool pending = false;
+        void Signal() {
+            {
+                std::lock_guard<std::mutex> lock(m);
+                pending = true;
+            }
+            cv.notify_all();
+        }
+        bool Wait(std::chrono::milliseconds timeout) {
+            std::unique_lock<std::mutex> lock(m);
+            bool got = cv.wait_for(lock, timeout, [&] { return pending; });
+            pending = false;
+            return got;
+        }
+    };
+    explicit CaptureService(FrameEvent* frameEvent);
+    ~CaptureService();
+    CaptureService(const CaptureService&) = delete;
+    CaptureService& operator=(const CaptureService&) = delete;
+
+    void Start(std::string deviceUniqueID);
+    void Stop();
+    bool TryConsume(VideoFrame& out) { return latest_.Consume(out); }
+    std::string Status() const;
+    std::string Signal() const;
+    std::uint64_t FramesReceived() const { return framesReceived_.load(); }
+    bool Running() const { return running_.load(); }
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    FrameEvent* frameEvent_ = nullptr;
+    LatestFrame latest_;
+    mutable std::mutex statusMutex_;
+    std::string status_ = "Select a capture device from the Capture menu.";
+    std::string signal_;
+    std::atomic<bool> running_{false};
+    std::atomic<std::uint64_t> framesReceived_{0};
+    friend struct Impl;
+};
+
+#endif

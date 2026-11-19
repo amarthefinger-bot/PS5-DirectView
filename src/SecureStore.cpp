@@ -1,5 +1,6 @@
 #include "SecureStore.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <dpapi.h>
 
@@ -63,3 +64,5 @@ void Erase(const wchar_t* name) {
 }
 
 } // namespace secure_store
+
+#endif // _WIN32

@@ -1,5 +1,6 @@
 #include "Renderer.h"
 
+#ifdef _WIN32
 #include <d3d11_4.h>
 #include <d3dcompiler.h>
 #include <mfobjects.h>
@@ -679,3 +680,5 @@ void D3DRenderer::Redraw() {
     if (hasImage_ && paramsDirty_) UpdateParams(lastFormat_);
     Present(); // also draws the UI over black when there is no video
 }
+
+#endif // _WIN32

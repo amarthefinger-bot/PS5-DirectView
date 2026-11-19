@@ -1,5 +1,6 @@
 #include "InputManager.h"
 
+#ifdef _WIN32
 #include <avrt.h>
 
 #include <algorithm>
@@ -335,3 +336,5 @@ void InputManager::Evaluate(LARGE_INTEGER start, bool timed) {
         statsWindowStart_ = tick;
     }
 }
+
+#endif // _WIN32

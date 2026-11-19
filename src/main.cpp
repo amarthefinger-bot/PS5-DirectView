@@ -5,6 +5,8 @@
 #include "Renderer.h"
 #include "Ui.h"
 
+#ifdef _WIN32
+
 #include <windows.h>
 #include <windowsx.h>
 #include <commdlg.h>
@@ -217,6 +219,10 @@ public:
         ui_.Initialize(renderer_.D2D());
         renderer_.SetOverlay([this](ID2D1DeviceContext* ctx, const D2D1_RECT_F& video) {
             ui_.Draw(ctx, video, settings_, BuildInfo());
+            // WM_SETCURSOR only fires on mouse movement; once the UI fades out
+            // while the mouse is idle, the pointer would otherwise linger over
+            // the game. Re-apply the hide every frame.
+            if (!ui_.ControlsVisible() || input_.Captured()) SetCursor(nullptr);
         });
         if (!settings_.overlayImage.empty() &&
             !ui_.LoadOverlayImage(renderer_.D2D(), settings_.overlayImage))
@@ -886,3 +892,5 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     CoUninitialize();
     return code;
 }
+
+#endif // _WIN32

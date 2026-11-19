@@ -1,5 +1,6 @@
 #include "Capture.h"
 
+#ifdef _WIN32
 #include <avrt.h>
 #include <mfapi.h>
 #include <mferror.h>
@@ -621,3 +622,5 @@ void CaptureService::Worker(std::wstring link) {
     running_ = false;
     CoUninitialize();
 }
+
+#endif // _WIN32

@@ -5,54 +5,60 @@
 #include "InputSettings.h"
 #include "RemotePlayClient.h"
 
-#include <windows.h>
-#include <d2d1_1.h>
-#include <dwrite.h>
-#include <wrl/client.h>
-
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
-// Everything the user can configure. Persisted by the app in the registry.
+#ifdef _WIN32
+  #include <windows.h>
+  #include <d2d1_1.h>
+  #include <dwrite.h>
+  #include <wrl/client.h>
+#endif
+
+#ifdef _WIN32
+using UiStringT = std::wstring;
+#else
+using UiStringT = std::string;
+#endif
+
 struct Settings {
-    int sharpLevel = 2;        // 0 off .. 3 high
-    int rangeMode = 0;         // 0 auto, 1 full, 2 limited
+    int sharpLevel = 2;
+    int rangeMode = 0;
     bool vsync = false;
     bool audioEnabled = true;
-    std::wstring audioOutput;  // empty = Windows default
-    int volume = 100;          // 0..100
+    UiStringT audioOutput;
+    int volume = 100;
     bool muted = false;
-    bool hud = false;          // performance overlay
+    bool hud = false;
     bool crosshair = false;
-    int crossStyle = 0;        // 0 cross, 1 gap cross, 2 dot, 3 circle
-    int crossColor = 0;        // index into the swatch palette
-    int crossSize = 14;        // DIPs
-    std::wstring overlayImage; // PNG/JPG drawn over the game
-    int overlayPos = 0;        // 0 fill, 1 top-left, 2 top-right, 3 bottom-left, 4 bottom-right
-    int overlayScale = 25;     // % of video width (corner placement)
-    int overlayOpacity = 100;  // %
+    int crossStyle = 0;
+    int crossColor = 0;
+    int crossSize = 14;
+    UiStringT overlayImage;
+    int overlayPos = 0;
+    int overlayScale = 25;
+    int overlayOpacity = 100;
     bool alwaysOnTop = false;
-    InputSettings input;       // mouse & keyboard -> PS5 controller (saved separately)
+    InputSettings input;
 };
 
-// Live state the UI displays (read-only for the UI).
 struct UiInfo {
     bool hasVideo = false;
     bool capturing = false;
     bool testFile = false;
     bool fullscreen = false;
-    std::wstring deviceName;
-    std::wstring signal;       // "1920x1080 · 60 fps · NV12 · GPU"
-    std::wstring message;      // shown on the no-signal screen
+    UiStringT deviceName;
+    UiStringT signal;
+    UiStringT message;
     double fps = 0, usbMs = 0, appMs = 0;
     unsigned long long dropped = 0;
-    std::wstring audioStatus;
+    UiStringT audioStatus;
     float audioPeak = 0;
-    std::vector<std::wstring> devices;
+    std::vector<UiStringT> devices;
     int selectedDevice = -1;
     std::vector<AudioOutput> outputs;
-    // Controller (PS5 Remote Play input).
     RpStatus rp;
     InputStats inputStats;
     PadState pad;
@@ -63,13 +69,11 @@ enum class UiCommand {
     SelectDevice, RefreshDevices, OpenTestVideo, ToggleFullscreen,
     PictureChanged, AudioToggled, AudioOutputChanged, VolumeChanged,
     ChooseOverlayImage, ClearOverlayImage, AlwaysOnTopChanged, OverlaysChanged,
-    // Controller tab.
     RpConnect, RpDisconnect, RpDiscover, RpPair, RpForget, InputChanged, CaptureInput,
 };
 
-// Text typed into the pairing form (owned by the Ui).
 struct PairForm {
-    std::wstring host, account, pin;
+    UiStringT host, account, pin;
 };
 
 struct UiEvent {
@@ -77,8 +81,8 @@ struct UiEvent {
     int index = 0;
 };
 
-// Immediate-mode UI drawn with Direct2D into the video swap chain.
-// All coordinates are DIPs.
+#ifdef _WIN32
+
 class Ui {
 public:
     void Initialize(ID2D1DeviceContext* context);
@@ -97,15 +101,12 @@ public:
     void CloseSettings() { settingsOpen_ = false; focusedField_ = -1; listenAction_ = -1; }
     bool RightDown(float x, float y);
 
-    // Text fields (pairing form).
     bool TextFocused() const { return settingsOpen_ && focusedField_ >= 0; }
     bool OnChar(wchar_t ch);
     bool OnTextKey(WPARAM key, bool ctrl);
     const PairForm& Pair() const { return pair_; }
     void ClearPin() { pair_.pin.clear(); }
 
-    // Binding capture: after clicking a mapping slot, the next key / mouse
-    // button pressed on the main window is assigned to it.
     bool Listening() const { return settingsOpen_ && listenAction_ >= 0; }
     void AssignBinding(Settings& settings, InputCode code);
     void CancelListening() { listenAction_ = -1; }
@@ -123,7 +124,6 @@ private:
         std::function<void()> rightClick;
     };
 
-    // Drawing helpers.
     void Fill(const D2D1_RECT_F& r, UINT32 rgb, float alpha = 1.0f, float radius = 0.0f);
     void Stroke(const D2D1_RECT_F& r, UINT32 rgb, float alpha, float radius, float width = 1.0f);
     void Text(const std::wstring& text, const D2D1_RECT_F& r, IDWriteTextFormat* format,
@@ -137,7 +137,6 @@ private:
     void AddHit(const D2D1_RECT_F& r, std::function<void()> click,
                 std::function<void(float)> drag = nullptr);
 
-    // Widgets.
     void IconButton(const D2D1_RECT_F& r, wchar_t glyph, bool active,
                     std::function<void()> click, const wchar_t* tip = nullptr);
     void Button(const D2D1_RECT_F& r, const std::wstring& label, wchar_t glyph,
@@ -158,7 +157,6 @@ private:
     float Paragraph(float y, const std::wstring& text, UINT32 rgb, float height);
     void StickView(const D2D1_RECT_F& r, float x, float y, const wchar_t* label);
 
-    // Screens.
     void DrawOverlays(const D2D1_RECT_F& video, const Settings& s, const UiInfo& info);
     void DrawNoSignal(const D2D1_SIZE_F& size, const UiInfo& info);
     void DrawTopBar(const D2D1_SIZE_F& size, Settings& s, const UiInfo& info);
@@ -180,17 +178,67 @@ private:
     std::function<void(float)> activeDrag_;
     D2D1_RECT_F clip_{};
     float mouseX_ = -1, mouseY_ = -1;
-    float fade_ = 1.0f;      // controls opacity (auto-hide)
-    float alpha_ = 1.0f;     // multiplier applied by the drawing helpers
-    float panelX_ = 0;       // left edge of the settings drawer
+    float fade_ = 1.0f;
+    float alpha_ = 1.0f;
+    float panelX_ = 0;
     float scroll_ = 0, contentHeight_ = 0, viewHeight_ = 0;
     bool settingsOpen_ = false;
     ULONGLONG lastActivity_ = 0;
-    int tab_ = 0;               // 0 video & audio, 1 controller
-    int focusedField_ = -1;     // pairing text field with keyboard focus
+    int tab_ = 0;
+    int focusedField_ = -1;
     int listenAction_ = -1, listenSlot_ = 0;
     bool showPairForm_ = false;
     PairForm pair_;
     bool wasCaptured_ = false;
     ULONGLONG capturedTick_ = 0;
 };
+
+#else
+
+// macOS Ui: hosts a native NSMenu + a borderless overlay NSWindow that draws
+// the DirectView controls with CoreGraphics on top of the Metal view.
+// Draw() is called once per frame from Renderer_Mac.mm's overlay callback.
+class Ui {
+public:
+    using RectF = struct { float left, top, right, bottom; };
+    using SizeF = struct { float width, height; };
+
+    // ctx: CGContextRef bridged as void*.
+    void Initialize(void* cgContext);
+    void Draw(void* cgContext, const RectF& video, Settings& settings, const UiInfo& info);
+
+    bool MouseMove(float x, float y);
+    bool MouseDown(float x, float y);
+    bool MouseUp();
+    bool Wheel(float x, float y, float delta);
+    void Activity();
+    bool ControlsVisible() const;
+    bool SettingsOpen() const;
+    void ToggleSettings();
+    void OpenController();
+    void CloseSettings();
+    bool RightDown(float x, float y);
+
+    bool TextFocused() const;
+    bool OnChar(uint32_t ch);     // UTF-32 codepoint
+    bool OnTextKey(int keyCode, bool ctrl);
+    const PairForm& Pair() const { return pair_; }
+    void ClearPin() { pair_.pin.clear(); }
+
+    bool Listening() const;
+    void AssignBinding(Settings& settings, InputCode code);
+    void CancelListening();
+    std::vector<UiEvent> TakeEvents();
+
+    bool LoadOverlayImage(void* cgContext, const std::string& path);
+    void ClearOverlayImage();
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    PairForm pair_;
+    std::vector<UiEvent> events_;
+    friend struct Impl;
+};
+
+#endif

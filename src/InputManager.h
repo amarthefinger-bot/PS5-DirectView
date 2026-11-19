@@ -4,36 +4,30 @@
 #include "InputSettings.h"
 #include "MouseTranslator.h"
 
-#include <windows.h>
-
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 
+#ifdef _WIN32
+  #include <windows.h>
+#endif
+
 struct InputStats {
-    double mouseHz = 0;            // raw mouse reports per second while captured
-    double padUpdatesPerSec = 0;   // controller states handed to Remote Play
-    double processAvgUs = 0;       // WM_INPUT received -> controller state submitted
+    double mouseHz = 0;
+    double padUpdatesPerSec = 0;
+    double processAvgUs = 0;
     double processMaxUs = 0;
-    double tickJitterUs = 0;       // input-thread timer lateness (avg)
+    double tickJitterUs = 0;
 };
 
-// Mouse & keyboard -> controller emulation on a dedicated thread.
-//
-// While captured, raw input (WM_INPUT) for mouse and keyboard is registered
-// with RIDEV_NOLEGACY on a message-only window owned by this thread, so:
-//   * the main/render thread receives no mouse/keyboard messages at all,
-//   * keys don't reach DirectView shortcuts or Windows (system keys such as
-//     Alt+Tab / Win / Ctrl+Alt+Del still work),
-// and the cursor is clipped by the main thread so the desktop doesn't move.
-// F8 or Esc releases capture (handled here, never sent to the PS5).
+#ifdef _WIN32
+
 class InputManager {
 public:
     using PadSink = std::function<void(const PadState&)>;
-    // Posted to the main window when the input thread released capture
-    // itself (F8/Esc pressed, focus lost). wParam: 1 = by key, 0 = focus.
     static constexpr UINT kReleasedMessage = WM_APP + 40;
 
     InputManager() = default;
@@ -44,8 +38,8 @@ public:
     void Start(HWND mainWindow, PadSink sink);
     void Stop();
 
-    void SetSettings(const InputSettings& settings); // thread-safe copy
-    void SetCaptured(bool captured);                  // main thread
+    void SetSettings(const InputSettings& settings);
+    void SetCaptured(bool captured);
     bool Captured() const { return captured_.load(); }
 
     PadState CurrentPad() const;
@@ -72,23 +66,21 @@ private:
     HANDLE timer_ = nullptr;
     PadSink sink_;
     std::atomic<bool> captured_{false};
-    bool registered_ = false; // input thread only
-    bool active_ = false;     // input thread: capture applied
+    bool registered_ = false;
+    bool active_ = false;
 
     mutable std::mutex settingsMutex_;
     InputSettings pendingSettings_;
-    InputSettings settings_;  // input thread copy
+    InputSettings settings_;
 
-    // Input-thread state.
     MouseTranslator translator_;
     bool down_[input_code::kMax]{};
     double pressTime_[input_code::kMax]{};
-    double wheelUntil_[2]{};  // wheel up/down pulse end
+    double wheelUntil_[2]{};
     PadState sent_;
     bool sentValid_ = false;
     double qpcToMs_ = 0;
 
-    // Stats (written by input thread, read by UI).
     mutable std::mutex statsMutex_;
     PadState current_;
     InputStats stats_;
@@ -97,3 +89,42 @@ private:
     ULONGLONG statsWindowStart_ = 0;
     double lastTickMs_ = 0;
 };
+
+#else
+
+// macOS InputManager: CGEventTap + IOHID based. The main window pointer is an
+// NSWindow* bridged through void*. PadSink called off the CFRunLoop thread.
+class InputManager {
+public:
+    using PadSink = std::function<void(const PadState&)>;
+    // Mac posts kReleasedNotification via NSNotificationCenter instead of WM_APP.
+    static constexpr int kReleasedByKey = 1;
+    static constexpr int kReleasedByFocus = 0;
+    using ReleaseSink = std::function<void(int reason)>;
+
+    InputManager() = default;
+    ~InputManager();
+    InputManager(const InputManager&) = delete;
+    InputManager& operator=(const InputManager&) = delete;
+
+    void Start(void* nsWindow, PadSink sink, ReleaseSink onRelease = {});
+    void Stop();
+
+    void SetSettings(const InputSettings& settings);
+    void SetCaptured(bool captured);
+    bool Captured() const { return captured_.load(); }
+
+    PadState CurrentPad() const;
+    InputStats Stats() const;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    std::atomic<bool> captured_{false};
+    mutable std::mutex statsMutex_;
+    PadState current_;
+    InputStats stats_;
+    friend struct Impl;
+};
+
+#endif

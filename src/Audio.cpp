@@ -1,5 +1,6 @@
 #include "Audio.h"
 
+#ifdef _WIN32
 #include <initguid.h>
 #include <audioclient.h>
 #include <avrt.h>
@@ -434,3 +435,5 @@ void AudioPassthrough::Worker(std::wstring videoLink) {
     CoUninitialize();
     running_ = false;
 }
+
+#endif // _WIN32

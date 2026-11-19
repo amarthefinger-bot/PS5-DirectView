@@ -2,78 +2,91 @@
 
 #include "ControllerState.h"
 
-#include <windows.h>
-
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
-// Input-only PS5 Remote Play connection (LAN), built on the vendored
-// chiaki-ng protocol core. The session is opened with Remote Play audio and
-// video disabled: the console still runs a minimal 360p stream (the protocol
-// requires one), but every video/audio packet is dropped by the transport
-// before decryption, FEC or decoding. DirectView keeps using HDMI capture.
+#ifdef _WIN32
+  #include <windows.h>
+#endif
+
+#ifdef _WIN32
+using RpStringT = std::wstring;
+#else
+using RpStringT = std::string;
+#endif
 
 enum class RpState {
-    NotPaired,     // no stored pairing
-    Disconnected,  // paired, idle
+    NotPaired,
+    Disconnected,
     Pairing,
-    Searching,     // locating the console on the network
-    Waking,        // console in rest mode: wake-up sent, waiting
+    Searching,
+    Waking,
     Connecting,
     Connected,
-    Reconnecting,  // waiting before an automatic retry
+    Reconnecting,
 };
 
 struct FoundConsole {
-    std::wstring name, host, id, firmware;
+    RpStringT name, host, id, firmware;
     bool ps5 = false;
-    bool ready = false; // false = rest mode
+    bool ready = false;
 };
 
 struct RpStatus {
     RpState state = RpState::NotPaired;
     bool paired = false;
-    bool error = false;           // message describes a failure
-    std::wstring message;         // last progress / error text for the UI
-    std::wstring consoleName, host;
+    bool error = false;
+    RpStringT message;
+    RpStringT consoleName, host;
     bool discovering = false;
     std::vector<FoundConsole> found;
-    double rttMs = 0.0;           // measured by the Remote Play network test
+    double rttMs = 0.0;
     unsigned mtu = 0;
+#ifdef _WIN32
     ULONGLONG connectedSinceTick = 0;
-    // Controller submission statistics (input thread -> Remote Play sender).
+#else
+    std::uint64_t connectedSinceTick = 0; // mach_absolute_time ns
+#endif
     std::uint64_t padsSubmitted = 0;
     double submitAvgUs = 0.0, submitMaxUs = 0.0;
 };
 
+#ifdef _WIN32
 const wchar_t* RpStateName(RpState state);
+#else
+const char* RpStateName(RpState state);
+#endif
 
 class RemotePlayClient {
 public:
-    // Posted to the notify window whenever RpStatus changes.
+#ifdef _WIN32
     static constexpr UINT kStatusMessage = WM_APP + 41;
+#endif
 
     RemotePlayClient();
     ~RemotePlayClient();
     RemotePlayClient(const RemotePlayClient&) = delete;
     RemotePlayClient& operator=(const RemotePlayClient&) = delete;
 
+#ifdef _WIN32
     void Start(HWND notifyWindow);
-    void Stop(); // disconnects (releasing all buttons) and joins all threads
+#else
+    // macOS: notifier called on an arbitrary thread when RpStatus changes.
+    using StatusNotifier = std::function<void()>;
+    void Start(StatusNotifier onChange);
+#endif
+    void Stop();
 
     void Discover();
-    // host: IP/hostname; account: PSN account ID (decimal or 12-char base64);
-    // pin: 8-digit code from PS5 Settings > System > Remote Play > Pair Device.
-    void Pair(const std::wstring& host, const std::wstring& account, const std::wstring& pin);
+    void Pair(const RpStringT& host, const RpStringT& account, const RpStringT& pin);
     void Forget();
     void Connect();
     void Disconnect();
     void SetAutoReconnect(bool enabled);
 
-    // Thread-safe, non-blocking (one mutex + the protocol library's queue).
-    // Called from the input thread for every controller change.
     void SubmitPad(const PadState& pad);
 
     RpStatus Status() const;

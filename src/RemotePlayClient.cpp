@@ -1,5 +1,6 @@
 #include "RemotePlayClient.h"
 
+#ifdef _WIN32
 #include "SecureStore.h"
 
 #include <winsock2.h>
@@ -952,3 +953,5 @@ RpStatus RemotePlayClient::Status() const {
     }
     return s;
 }
+
+#endif // _WIN32
