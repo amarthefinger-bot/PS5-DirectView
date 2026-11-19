@@ -86,6 +86,7 @@ if(PS5DV_MAC)
     src/mac/InputManager_Mac.mm
     src/mac/Ui_Mac.mm
     src/mac/SecureStore_Mac.mm
+    src/mac/RemotePlayClient_Mac.cpp
     src/mac/MacApp.h
     src/mac/MacApp.mm
   )
@@ -93,9 +94,12 @@ if(PS5DV_MAC)
   add_executable(PS5DirectView MACOSX_BUNDLE ${PS5DV_SHARED_SRC} ${PS5DV_MAC_SRC})
   target_compile_features(PS5DirectView PRIVATE cxx_std_20)
   target_compile_options(PS5DirectView PRIVATE
-    -fobjc-arc -Wall -Wno-unused-parameter -Wno-deprecated-declarations)
-  set_source_files_properties(${PS5DV_MAC_SRC} PROPERTIES
-    COMPILE_FLAGS "-fobjc-arc")
+    -Wall -Wno-unused-parameter -Wno-deprecated-declarations)
+  foreach(_src IN LISTS PS5DV_MAC_SRC)
+    if(_src MATCHES "\\.mm$")
+      set_source_files_properties(${_src} PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    endif()
+  endforeach()
   target_include_directories(PS5DirectView PRIVATE src src/mac)
 
   find_library(FW_COCOA Cocoa REQUIRED)
@@ -104,6 +108,7 @@ if(PS5DV_MAC)
   find_library(FW_QUARTZCORE QuartzCore REQUIRED)
   find_library(FW_COREVIDEO CoreVideo REQUIRED)
   find_library(FW_COREMEDIA CoreMedia REQUIRED)
+  find_library(FW_COREMEDIAIO CoreMediaIO REQUIRED)
   find_library(FW_AVFOUNDATION AVFoundation REQUIRED)
   find_library(FW_COREAUDIO CoreAudio REQUIRED)
   find_library(FW_AUDIOTOOLBOX AudioToolbox REQUIRED)
@@ -121,7 +126,7 @@ if(PS5DV_MAC)
   target_link_libraries(PS5DirectView PRIVATE
     chiaki_core
     ${FW_COCOA} ${FW_METAL} ${FW_METALKIT} ${FW_QUARTZCORE}
-    ${FW_COREVIDEO} ${FW_COREMEDIA} ${FW_AVFOUNDATION}
+    ${FW_COREVIDEO} ${FW_COREMEDIA} ${FW_COREMEDIAIO} ${FW_AVFOUNDATION}
     ${FW_COREAUDIO} ${FW_AUDIOTOOLBOX} ${FW_AUDIOUNIT}
     ${FW_IOKIT} ${FW_CORETEXT} ${FW_COREGRAPHICS} ${FW_IMAGEIO}
     ${FW_APPKIT} ${FW_FOUNDATION} ${FW_SECURITY}
