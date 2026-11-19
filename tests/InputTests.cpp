@@ -6,6 +6,14 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+// Carbon kVK_* values (same values InputSettings.cpp uses in mac_vk).
+// Reused here so the test can name default bindings portably.
+#define VK_LSHIFT   0x38
+#define VK_LCONTROL 0x3B
+#define VK_SPACE    0x31
+#define VK_F8       0x64
+#define VK_ESCAPE   0x35
 #endif
 
 #include <chrono>
