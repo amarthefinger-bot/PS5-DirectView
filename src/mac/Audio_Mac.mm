@@ -266,6 +266,7 @@ std::vector<AudioOutput> ListAudioOutputs() {
     return out;
 }
 
+AudioPassthrough::AudioPassthrough() = default;
 AudioPassthrough::~AudioPassthrough() { Stop(); }
 
 std::string AudioPassthrough::Status() const {

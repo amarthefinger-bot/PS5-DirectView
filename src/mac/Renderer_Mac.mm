@@ -311,3 +311,6 @@ void D3DRenderer::Redraw() {
         [cmd commit];
     }
 }
+
+D3DRenderer::D3DRenderer() = default;
+D3DRenderer::~D3DRenderer() = default;

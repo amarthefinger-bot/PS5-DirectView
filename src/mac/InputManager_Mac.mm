@@ -391,6 +391,7 @@ struct InputManager::Impl {
     }
 };
 
+InputManager::InputManager() = default;
 InputManager::~InputManager() { Stop(); }
 
 void InputManager::Start(void* nsWindow, PadSink sink, ReleaseSink onRelease) {

@@ -319,3 +319,11 @@ void Ui::ClearOverlayImage() {
         impl_->overlayImage = nullptr;
     }
 }
+
+Ui::Ui() = default;
+Ui::~Ui() {
+    if (impl_ && impl_->overlayImage) {
+        CGImageRelease(impl_->overlayImage);
+        impl_->overlayImage = nullptr;
+    }
+}

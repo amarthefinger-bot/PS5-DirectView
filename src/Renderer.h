@@ -102,6 +102,11 @@ private:
 // macOS renderer: Metal-backed. Opaque pimpl; `MetalView` is set by Ui_Mac.
 class D3DRenderer {
 public:
+    D3DRenderer();
+    ~D3DRenderer();
+    D3DRenderer(const D3DRenderer&) = delete;
+    D3DRenderer& operator=(const D3DRenderer&) = delete;
+
     // Takes an NSView* (actually MTKView*). Bridged as void* for header purity.
     void Initialize(void* metalView);
     void Resize(unsigned width, unsigned height);

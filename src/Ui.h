@@ -203,6 +203,11 @@ public:
     using RectF = struct { float left, top, right, bottom; };
     using SizeF = struct { float width, height; };
 
+    Ui();
+    ~Ui();
+    Ui(const Ui&) = delete;
+    Ui& operator=(const Ui&) = delete;
+
     // ctx: CGContextRef bridged as void*.
     void Initialize(void* cgContext);
     void Draw(void* cgContext, const RectF& video, Settings& settings, const UiInfo& info);

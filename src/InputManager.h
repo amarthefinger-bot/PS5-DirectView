@@ -102,7 +102,7 @@ public:
     static constexpr int kReleasedByFocus = 0;
     using ReleaseSink = std::function<void(int reason)>;
 
-    InputManager() = default;
+    InputManager();
     ~InputManager();
     InputManager(const InputManager&) = delete;
     InputManager& operator=(const InputManager&) = delete;

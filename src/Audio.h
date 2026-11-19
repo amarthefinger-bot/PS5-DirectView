@@ -26,7 +26,7 @@ std::vector<AudioOutput> ListAudioOutputs();
 
 class AudioPassthrough {
 public:
-    AudioPassthrough() = default;
+    AudioPassthrough();
     ~AudioPassthrough();
     AudioPassthrough(const AudioPassthrough&) = delete;
     AudioPassthrough& operator=(const AudioPassthrough&) = delete;
