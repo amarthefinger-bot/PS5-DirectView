@@ -6,6 +6,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+constexpr InputCode kKeyW = 'W', kKeyA = 'A', kKeyS = 'S', kKeyD = 'D';
+constexpr InputCode kKeyQ = 'Q', kKeyR = 'R', kKeyE = 'E';
 #else
 // Carbon kVK_* values (same values InputSettings.cpp uses in mac_vk).
 // Reused here so the test can name default bindings portably.
@@ -14,6 +16,8 @@
 #define VK_SPACE    0x31
 #define VK_F8       0x64
 #define VK_ESCAPE   0x35
+constexpr InputCode kKeyW = 0x0D, kKeyA = 0x00, kKeyS = 0x01, kKeyD = 0x02;
+constexpr InputCode kKeyQ = 0x0C, kKeyR = 0x0F, kKeyE = 0x0E;
 #endif
 
 #include <chrono>
@@ -63,14 +67,14 @@ int main() {
     {
         const Bindings b = DefaultBindings();
         auto first = [&](Action a) { return b[static_cast<size_t>(a)][0]; };
-        Check(first(Action::MoveUp) == 'W' && first(Action::MoveLeft) == 'A' &&
-              first(Action::MoveDown) == 'S' && first(Action::MoveRight) == 'D', "WASD -> left stick");
+        Check(first(Action::MoveUp) == kKeyW && first(Action::MoveLeft) == kKeyA &&
+              first(Action::MoveDown) == kKeyS && first(Action::MoveRight) == kKeyD, "WASD -> left stick");
         Check(first(Action::L3) == VK_LSHIFT, "Shift -> L3");
         Check(first(Action::Cross) == VK_SPACE, "Space -> Cross");
-        Check(first(Action::Square) == 'R', "R -> Square");
-        Check(first(Action::Triangle) == 'E', "E -> Triangle");
+        Check(first(Action::Square) == kKeyR, "R -> Square");
+        Check(first(Action::Triangle) == kKeyE, "E -> Triangle");
         Check(first(Action::Circle) == VK_LCONTROL, "Ctrl -> Circle");
-        Check(first(Action::L1) == 'Q', "Q -> L1");
+        Check(first(Action::L1) == kKeyQ, "Q -> L1");
         Check(first(Action::R2) == input_code::kMouseLeft, "Left mouse -> R2");
         Check(first(Action::L2) == input_code::kMouseRight, "Right mouse -> L2");
         bool noRelease = true;
