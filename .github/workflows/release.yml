@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v1.1.0 and this builds, tests and publishes a zip.
+# Push a tag like v1.1.0 and this builds Windows + macOS artifacts and publishes them.
 on:
   push:
     tags: ['v*']
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  windows:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
@@ -21,6 +21,7 @@ jobs:
         run: cmake --build build --config Release --parallel --target PS5DirectView InputTests CryptoTests
 
       - name: Test
+        shell: pwsh
         run: |
           build\Release\InputTests.exe
           if ($LASTEXITCODE -ne 0) { exit 1 }
@@ -28,6 +29,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Package
+        shell: pwsh
         run: |
           $name = "PS5DirectView-${{ github.ref_name }}-windows-x64"
           New-Item -ItemType Directory $name | Out-Null
@@ -37,9 +39,89 @@ jobs:
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
 
-      - name: Publish
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-release
+          path: |
+            PS5DirectView-${{ github.ref_name }}-windows-x64.zip
+            PS5DirectView-${{ github.ref_name }}-windows-x64.zip.sha256
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure (universal arm64 + x86_64)
+        run: >
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+
+      - name: Build app
+        run: cmake --build build --parallel
+
+      - name: Build tests
+        run: cmake --build build --target InputTests CryptoTests --parallel
+
+      - name: Input tests
+        run: ./build/InputTests
+
+      - name: Crypto tests
+        run: ./build/CryptoTests
+
+      - name: Package
+        run: |
+          name="PS5DirectView-${{ github.ref_name }}-macos-universal"
+          mkdir -p "$name"
+          /usr/bin/ditto "build/PS5DirectView.app" "$name/PS5DirectView.app"
+          cp README.md LICENSE "$name/"
+          cp third_party/README.md "$name/THIRD_PARTY.md"
+          cp test-1080p60.mp4 "$name/"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$name" "$name.zip"
+          shasum -a 256 "$name.zip" | awk '{print $1"  "$2}' > "$name.zip.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-release
+          path: |
+            PS5DirectView-${{ github.ref_name }}-macos-universal.zip
+            PS5DirectView-${{ github.ref_name }}-macos-universal.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: windows-release
+          path: dist
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: macos-release
+          path: dist
+
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $name = "PS5DirectView-${{ github.ref_name }}-windows-x64"
-          gh release create "${{ github.ref_name }}" "$name.zip" "$name.zip.sha256" --title "${{ github.ref_name }}" --generate-notes
+          gh release create "${{ github.ref_name }}" \
+            dist/PS5DirectView-${{ github.ref_name }}-windows-x64.zip \
+            dist/PS5DirectView-${{ github.ref_name }}-windows-x64.zip.sha256 \
+            dist/PS5DirectView-${{ github.ref_name }}-macos-universal.zip \
+            dist/PS5DirectView-${{ github.ref_name }}-macos-universal.zip.sha256 \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
