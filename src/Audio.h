@@ -40,6 +40,10 @@ public:
     void SetMuted(bool muted) { muted_ = muted; }
     float Peak() const { return peak_.load(); }
 
+#ifndef _WIN32
+    struct Impl;
+#endif
+
 private:
     void Worker(AudioStringT videoSymbolicLink);
     void SetStatus(const AudioStringT& value);
@@ -63,7 +67,6 @@ private:
     std::atomic<bool> muted_{false};
     std::atomic<float> peak_{0.0f};
 #ifndef _WIN32
-    struct Impl;
     std::unique_ptr<Impl> impl_;
 #endif
 };

@@ -160,8 +160,9 @@ public:
     std::uint64_t FramesReceived() const { return framesReceived_.load(); }
     bool Running() const { return running_.load(); }
 
-private:
     struct Impl;
+
+private:
     std::unique_ptr<Impl> impl_;
     FrameEvent* frameEvent_ = nullptr;
     LatestFrame latest_;
