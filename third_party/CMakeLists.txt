@@ -89,6 +89,8 @@ elseif(APPLE)
   target_compile_definitions(chiaki_core PRIVATE
     _alloca=alloca
     _DARWIN_UNLIMITED_SELECT=1 __APPLE_USE_RFC_3542=1)
-  target_link_libraries(chiaki_core PUBLIC tp_mbedtls tp_nanopb tp_jerasure)
+  find_library(CHIAKI_FW_CORESERVICES CoreServices REQUIRED)
+  target_link_libraries(chiaki_core PUBLIC tp_mbedtls tp_nanopb tp_jerasure
+    ${CHIAKI_FW_CORESERVICES})
   # Darwin: no bcrypt/iphlpapi; sockets are in libSystem (no explicit link needed).
 endif()
