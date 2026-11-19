@@ -174,6 +174,8 @@ void AudioPassthrough::SetOutput(const std::wstring& id) {
     ++outputVersion_;
 }
 
+AudioPassthrough::AudioPassthrough() = default;
+
 AudioPassthrough::~AudioPassthrough() {
     Stop();
 }
