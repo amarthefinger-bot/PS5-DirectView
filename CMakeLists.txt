@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.23)
-project(PS5DirectView VERSION 1.2.0 LANGUAGES C CXX)
+project(PS5DirectView VERSION 1.3.0 LANGUAGES C CXX)
 
 if(APPLE)
   enable_language(OBJC)
@@ -183,4 +183,21 @@ if(PS5DV_WIN)
     UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
   target_compile_options(RemotePlayProbe PRIVATE /W4 /EHsc /utf-8 /permissive-)
   target_link_libraries(RemotePlayProbe PRIVATE chiaki_core crypt32 advapi32 user32)
+endif()
+
+add_executable(FrameGenerationTests EXCLUDE_FROM_ALL tests/FrameGenerationTests.cpp)
+target_include_directories(FrameGenerationTests PRIVATE src)
+target_compile_features(FrameGenerationTests PRIVATE cxx_std_20)
+
+if(PS5DV_WIN)
+  add_executable(RendererFrameGenerationTests EXCLUDE_FROM_ALL
+    tests/RendererFrameGenerationTests.cpp src/Renderer.cpp)
+  target_include_directories(RendererFrameGenerationTests PRIVATE src)
+  target_compile_features(RendererFrameGenerationTests PRIVATE cxx_std_20)
+  target_compile_definitions(RendererFrameGenerationTests PRIVATE
+    UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
+  target_compile_options(RendererFrameGenerationTests PRIVATE /EHsc /utf-8)
+  target_link_libraries(RendererFrameGenerationTests PRIVATE
+    mfplat mfreadwrite mf mfuuid d3d11 dxgi d3dcompiler d2d1 dwrite
+    windowscodecs ole32 user32 gdi32)
 endif()

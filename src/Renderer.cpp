@@ -82,7 +82,247 @@ float4 PSNv12(VertexOutput v) : SV_TARGET {
 // Contrast-adaptive sharpening (after AMD FidelityFX CAS): restores edge
 // detail lost to the card's scaler and MJPEG compression, while backing off
 // on already-contrasty edges so it does not ring or amplify block noise.
+
+// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files(the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions :
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+// EASU port: native reciprocal/rsqrt and float constants.
+float safeRcp(float x) { return 1.0 / max(x,1e-8); }
+float safeRsqrt(float x) { return rsqrt(max(x,1e-8)); }
+float3 min3(float3 a,float3 b,float3 c) { return min(a,min(b,c)); }
+float3 max3(float3 a,float3 b,float3 c) { return max(a,max(b,c)); }
+
+float4 FsrEasuRF(float2 p) { return plane0.GatherRed(linearSampler,p); }
+float4 FsrEasuGF(float2 p) { return plane0.GatherGreen(linearSampler,p); }
+float4 FsrEasuBF(float2 p) { return plane0.GatherBlue(linearSampler,p); }
+ void FsrEasuTapF(
+ inout float3 aC, 
+ inout float aW, 
+ float2 off, 
+ float2 dir, 
+ float2 len, 
+ float lob, 
+ float clp, 
+ float3 c){ 
+  
+  float2 v;
+  v.x=(off.x*( dir.x))+(off.y*dir.y);
+  v.y=(off.x*(-dir.y))+(off.y*dir.x);
+  
+  v*=len;
+  
+  float d2=v.x*v.x+v.y*v.y;
+  
+  d2=min(d2,clp);
+  
+  
+  
+  
+  
+  
+  
+  float wB=float(2.0/5.0)*d2+float(-1.0);
+  float wA=lob*d2+float(-1.0);
+  wB*=wB;
+  wA*=wA;
+  wB=float(25.0/16.0)*wB+float(-(25.0/16.0-1.0));
+  float w=wB*wA;
+  
+  aC+=c*w;aW+=w;}
+
+ 
+ void FsrEasuSetF(
+ inout float2 dir,
+ inout float len,
+ float2 pp,
+ bool biS,bool biT,bool biU,bool biV,
+ float lA,float lB,float lC,float lD,float lE){
+  
+  
+  
+  float w = float(0.0);
+  if(biS)w=(float(1.0)-pp.x)*(float(1.0)-pp.y);
+  if(biT)w=           pp.x *(float(1.0)-pp.y);
+  if(biU)w=(float(1.0)-pp.x)*           pp.y ;
+  if(biV)w=           pp.x *           pp.y ;
+  
+  
+  
+  
+  
+  
+  float dc=lD-lC;
+  float cb=lC-lB;
+  float lenX=max(abs(dc),abs(cb));
+  lenX=safeRcp(lenX);
+  float dirX=lD-lB;
+  dir.x+=dirX*w;
+  lenX=saturate(abs(dirX)*lenX);
+  lenX*=lenX;
+  len+=lenX*w;
+  
+  float ec=lE-lC;
+  float ca=lC-lA;
+  float lenY=max(abs(ec),abs(ca));
+  lenY=safeRcp(lenY);
+  float dirY=lE-lA;
+  dir.y+=dirY*w;
+  lenY=saturate(abs(dirY)*lenY);
+  lenY*=lenY;
+  len+=lenY*w;}
+
+ void FsrEasuF(
+ out float3 pix,
+ uint2 ip, 
+ float4 con0, 
+ float4 con1,
+ float4 con2,
+ float4 con3){
+
+  
+  float2 pp=float2(ip)*con0.xy+con0.zw;
+  float2 fp=floor(pp);
+  pp-=fp;
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  float2 p0=fp*con1.xy+con1.zw;
+  
+  float2 p1=p0+con2.xy;
+  float2 p2=p0+con2.zw;
+  float2 p3=p0+con3.xy;
+  float4 bczzR=FsrEasuRF(p0);
+  float4 bczzG=FsrEasuGF(p0);
+  float4 bczzB=FsrEasuBF(p0);
+  float4 ijfeR=FsrEasuRF(p1);
+  float4 ijfeG=FsrEasuGF(p1);
+  float4 ijfeB=FsrEasuBF(p1);
+  float4 klhgR=FsrEasuRF(p2);
+  float4 klhgG=FsrEasuGF(p2);
+  float4 klhgB=FsrEasuBF(p2);
+  float4 zzonR=FsrEasuRF(p3);
+  float4 zzonG=FsrEasuGF(p3);
+  float4 zzonB=FsrEasuBF(p3);
+
+  
+  float4 bczzL=bczzB*float4(0.5,0.5,0.5,0.5)+(bczzR*float4(0.5,0.5,0.5,0.5)+bczzG);
+  float4 ijfeL=ijfeB*float4(0.5,0.5,0.5,0.5)+(ijfeR*float4(0.5,0.5,0.5,0.5)+ijfeG);
+  float4 klhgL=klhgB*float4(0.5,0.5,0.5,0.5)+(klhgR*float4(0.5,0.5,0.5,0.5)+klhgG);
+  float4 zzonL=zzonB*float4(0.5,0.5,0.5,0.5)+(zzonR*float4(0.5,0.5,0.5,0.5)+zzonG);
+  
+  float bL=bczzL.x;
+  float cL=bczzL.y;
+  float iL=ijfeL.x;
+  float jL=ijfeL.y;
+  float fL=ijfeL.z;
+  float eL=ijfeL.w;
+  float kL=klhgL.x;
+  float lL=klhgL.y;
+  float hL=klhgL.z;
+  float gL=klhgL.w;
+  float oL=zzonL.z;
+  float nL=zzonL.w;
+  
+  float2 dir=float2(0.0,0.0);
+  float len=float(0.0);
+  FsrEasuSetF(dir,len,pp,true, false,false,false,bL,eL,fL,gL,jL);
+  FsrEasuSetF(dir,len,pp,false,true ,false,false,cL,fL,gL,hL,kL);
+  FsrEasuSetF(dir,len,pp,false,false,true ,false,fL,iL,jL,kL,nL);
+  FsrEasuSetF(dir,len,pp,false,false,false,true ,gL,jL,kL,lL,oL);
+
+  
+  float2 dir2=dir*dir;
+  float dirR=dir2.x+dir2.y;
+  bool zro=dirR<float(1.0/32768.0);
+  dirR=safeRsqrt(dirR);
+  dirR=zro?float(1.0):dirR;
+  dir.x=zro?float(1.0):dir.x;
+  dir*=float2(dirR,dirR);
+  
+  len=len*float(0.5);
+  len*=len;
+  
+  float stretch=(dir.x*dir.x+dir.y*dir.y)*safeRcp(max(abs(dir.x),abs(dir.y)));
+  
+  
+  
+  float2 len2=float2(float(1.0)+(stretch-float(1.0))*len,float(1.0)+float(-0.5)*len);
+  
+  
+  float lob=float(0.5)+float((1.0/4.0-0.04)-0.5)*len;
+  
+  float clp=safeRcp(lob);
+
+  
+  
+  
+  
+  
+  float3 min4=min(min3(float3(ijfeR.z,ijfeG.z,ijfeB.z),float3(klhgR.w,klhgG.w,klhgB.w),float3(ijfeR.y,ijfeG.y,ijfeB.y)),
+               float3(klhgR.x,klhgG.x,klhgB.x));
+  float3 max4=max(max3(float3(ijfeR.z,ijfeG.z,ijfeB.z),float3(klhgR.w,klhgG.w,klhgB.w),float3(ijfeR.y,ijfeG.y,ijfeB.y)),
+               float3(klhgR.x,klhgG.x,klhgB.x));
+  
+  float3 aC=float3(0.0,0.0,0.0);
+  float aW=float(0.0);
+  FsrEasuTapF(aC,aW,float2( 0.0,-1.0)-pp,dir,len2,lob,clp,float3(bczzR.x,bczzG.x,bczzB.x)); 
+  FsrEasuTapF(aC,aW,float2( 1.0,-1.0)-pp,dir,len2,lob,clp,float3(bczzR.y,bczzG.y,bczzB.y)); 
+  FsrEasuTapF(aC,aW,float2(-1.0, 1.0)-pp,dir,len2,lob,clp,float3(ijfeR.x,ijfeG.x,ijfeB.x)); 
+  FsrEasuTapF(aC,aW,float2( 0.0, 1.0)-pp,dir,len2,lob,clp,float3(ijfeR.y,ijfeG.y,ijfeB.y)); 
+  FsrEasuTapF(aC,aW,float2( 0.0, 0.0)-pp,dir,len2,lob,clp,float3(ijfeR.z,ijfeG.z,ijfeB.z)); 
+  FsrEasuTapF(aC,aW,float2(-1.0, 0.0)-pp,dir,len2,lob,clp,float3(ijfeR.w,ijfeG.w,ijfeB.w)); 
+  FsrEasuTapF(aC,aW,float2( 1.0, 1.0)-pp,dir,len2,lob,clp,float3(klhgR.x,klhgG.x,klhgB.x)); 
+  FsrEasuTapF(aC,aW,float2( 2.0, 1.0)-pp,dir,len2,lob,clp,float3(klhgR.y,klhgG.y,klhgB.y)); 
+  FsrEasuTapF(aC,aW,float2( 2.0, 0.0)-pp,dir,len2,lob,clp,float3(klhgR.z,klhgG.z,klhgB.z)); 
+  FsrEasuTapF(aC,aW,float2( 1.0, 0.0)-pp,dir,len2,lob,clp,float3(klhgR.w,klhgG.w,klhgB.w)); 
+  FsrEasuTapF(aC,aW,float2( 1.0, 2.0)-pp,dir,len2,lob,clp,float3(zzonR.z,zzonG.z,zzonB.z)); 
+  FsrEasuTapF(aC,aW,float2( 0.0, 2.0)-pp,dir,len2,lob,clp,float3(zzonR.w,zzonG.w,zzonB.w)); 
+
+  
+  pix=min(max4,max(min4,aC*safeRcp(aW)));}
+
+float3 Easu(float2 uv,float2 inputSize,float2 outputSize) {
+    float2 ratio=inputSize/outputSize, t=1.0/inputSize;
+    float4 c0=float4(ratio,0.5*ratio-0.5);
+    float4 c1=float4(t,t.x,-t.y);
+    float4 c2=float4(-t.x,2*t.y,t.x,2*t.y);
+    float4 c3=float4(0,4*t.y,0,0);
+    float3 result;
+    FsrEasuF(result,uint2(uv*outputSize),c0,c1,c2,c3);
+    return saturate(result);
+}
+
 float4 PSPresent(VertexOutput v) : SV_TARGET {
+    uint iw,ih; plane0.GetDimensions(iw,ih);
+    if (sharp.w > 0.5 && sharp.y > iw && sharp.z > ih)
+        return float4(Easu(v.uv,float2(iw,ih),sharp.yz),1);
     float3 c = plane0.Sample(linearSampler, v.uv).rgb;
     if (sharp.x <= 0.0) return float4(c, 1.0);
     float w, h;
@@ -99,6 +339,57 @@ float4 PSPresent(VertexOutput v) : SV_TARGET {
     float3 r = (c + (n + s + e + o) * wgt) / (1.0 + 4.0 * wgt);
     return float4(saturate(r), 1.0);
 }
+
+Texture2D<float4> history : register(t2);
+Texture2D<float4> motion : register(t3);
+
+float luminance(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+float2 findMotion(float2 uv, float2 texel, bool reverse) {
+    float best = 1e9;
+    float2 result = float2(0, 0);
+    for (int stage = 0; stage < 2; ++stage) {
+        float2 center = result;
+        int radius = stage == 0 ? 8 : 3;
+        float stride = stage == 0 ? 4.0 : 1.0;
+        for (int y = -radius; y <= radius; ++y) {
+            for (int x = -radius; x <= radius; ++x) {
+                float2 d = center + float2(x, y) * stride * texel;
+                float error = 0;
+                for (int py = -1; py <= 1; ++py) {
+                    for (int px = -1; px <= 1; ++px) {
+                        float2 q = uv + float2(px, py) * texel * 4.0;
+                        float a = luminance(reverse ? plane0.SampleLevel(linearSampler, q, 0).rgb : history.SampleLevel(linearSampler, q, 0).rgb);
+                        float b = luminance(reverse ? history.SampleLevel(linearSampler, q + d, 0).rgb : plane0.SampleLevel(linearSampler, q + d, 0).rgb);
+                        error += abs(a - b);
+                    }
+                }
+                error += dot(d / texel, d / texel) * 0.000002;
+                if (error < best) { best = error; result = d; }
+            }
+        }
+    }
+    return result;
+}
+
+float4 PSMotion(VertexOutput v) : SV_TARGET {
+    uint w,h; plane0.GetDimensions(w,h);
+    float2 t = 1.0 / float2(w,h);
+    return float4(findMotion(v.uv,t,false), findMotion(v.uv,t,true));
+}
+float4 PSMidpoint(VertexOutput v) : SV_TARGET {
+    float4 flow = motion.SampleLevel(linearSampler,v.uv,0);
+    float2 aUV = v.uv - flow.xy * 0.5;
+    float2 bUV = v.uv - flow.zw * 0.5;
+    float3 a = history.SampleLevel(linearSampler,aUV,0).rgb;
+    float3 b = plane0.SampleLevel(linearSampler,bUV,0).rgb;
+    float3 current = plane0.SampleLevel(linearSampler,v.uv,0).rgb;
+    // Reject mismatches, disocclusions and cuts locally rather than dissolving.
+    float disagreement = max(abs(a.r-b.r),max(abs(a.g-b.g),abs(a.b-b.b)));
+    bool inside = all(aUV >= 0) && all(aUV <= 1) && all(bUV >= 0) && all(bUV <= 1);
+    float trust = inside ? 1.0-smoothstep(0.04,0.18,disagreement) : 0.0;
+    return float4(lerp(current,(a+b)*0.5,trust),1);
+}
+
 )HLSL";
 
 struct YuvParams {
@@ -262,6 +553,7 @@ void D3DRenderer::Initialize(HWND window) {
     struct { const char* entry; ComPtr<ID3D11PixelShader>* target; } pixelShaders[] = {
         {"PSBgra", &psBgra_}, {"PSYuy2", &psYuy2_},
         {"PSNv12", &psNv12_}, {"PSPresent", &psPresent_},
+        {"PSMotion", &psMotion_}, {"PSMidpoint", &psMidpoint_},
     };
     for (auto& ps : pixelShaders) {
         auto blob = Compile(ps.entry, "ps_5_0");
@@ -347,6 +639,10 @@ void D3DRenderer::ResetVideo() {
     rgbView_.Reset();
     rgbTarget_.Reset();
     rgbTexture_.Reset();
+    previousRgb_.Reset(); previousView_.Reset();
+    motionTexture_.Reset(); motionView_.Reset(); motionTarget_.Reset();
+    midpointTexture_.Reset(); midpointView_.Reset(); midpointTarget_.Reset();
+    cadence_.Reset(); showMidpoint_ = false;
     textureWidth_ = textureHeight_ = 0;
     hasImage_ = false;
 }
@@ -634,8 +930,13 @@ void D3DRenderer::Present() {
         context_->IASetInputLayout(nullptr);
         context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
+        YuvParams presentParams = MakeYuvParams(textureBt709_, textureFullRange_);
+        presentParams.sharp[0] = sharpness_;
+        presentParams.sharp[1] = vw; presentParams.sharp[2] = vh;
+        presentParams.sharp[3] = fsrUpscaling_ ? 1.0f : 0.0f;
+        context_->UpdateSubresource(yuvConstants_.Get(), 0, nullptr, &presentParams, 0, 0);
         context_->PSSetShader(psPresent_.Get(), nullptr, 0);
-        ID3D11ShaderResourceView* views[] = {rgbView_.Get()};
+        ID3D11ShaderResourceView* views[] = {showMidpoint_ ? midpointView_.Get() : rgbView_.Get()};
         ID3D11SamplerState* samplers[] = {sampler_.Get()};
         context_->PSSetShaderResources(0, 1, views);
         context_->PSSetSamplers(0, 1, samplers);
@@ -663,6 +964,19 @@ void D3DRenderer::Render(const VideoFrame& frame) {
     const FrameFormat& f = frame.format;
     if (!swapChain_ || !frame.buffer || !f.width || !f.height) return;
     EnsureTextures(f);
+    const auto step = cadence_.Next(frameGeneration_, f.fps, frame.sequence);
+    showMidpoint_ = false;
+    if (step == FrameGenerationCadence::Step::Endpoint) { Present(); return; }
+    if (step == FrameGenerationCadence::Step::Midpoint) {
+        if (!previousRgb_) {
+            D3D11_TEXTURE2D_DESC desc{}; rgbTexture_->GetDesc(&desc);
+            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            Check(device_->CreateTexture2D(&desc, nullptr, &previousRgb_), "History texture");
+            Check(device_->CreateShaderResourceView(previousRgb_.Get(), nullptr, &previousView_), "History view");
+        }
+        context_->ClearState();
+        context_->CopyResource(previousRgb_.Get(), rgbTexture_.Get());
+    }
     lastFormat_ = f;
     UpdateParams(f);
     if (CopyGpuFrame(frame)) {
@@ -670,10 +984,50 @@ void D3DRenderer::Render(const VideoFrame& frame) {
         Convert(gpuView0_.Get(), gpuView1_.Get());
     } else {
         texturePixel_ = f.pixel;
-        if (!Upload(frame)) return;
+        if (!Upload(frame)) { cadence_.Reset(); return; }
         Convert(plane0View_.Get(), plane1View_.Get());
     }
+    if (step == FrameGenerationCadence::Step::Midpoint) GenerateMidpoint();
     Present();
+}
+
+void D3DRenderer::GenerateMidpoint() {
+    if (!motionTexture_) {
+        auto make = [&](unsigned w, unsigned h, DXGI_FORMAT fmt,
+                        ComPtr<ID3D11Texture2D>& texture,
+                        ComPtr<ID3D11ShaderResourceView>& view,
+                        ComPtr<ID3D11RenderTargetView>& target) {
+            D3D11_TEXTURE2D_DESC d{};
+            d.Width=w; d.Height=h; d.MipLevels=1; d.ArraySize=1;
+            d.Format=fmt; d.SampleDesc.Count=1;
+            d.BindFlags=D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+            Check(device_->CreateTexture2D(&d,nullptr,&texture), "Frame generation texture");
+            Check(device_->CreateShaderResourceView(texture.Get(),nullptr,&view), "Frame generation SRV");
+            Check(device_->CreateRenderTargetView(texture.Get(),nullptr,&target), "Frame generation RTV");
+        };
+        make((textureWidth_+15)/16,(textureHeight_+15)/16,DXGI_FORMAT_R32G32B32A32_FLOAT,
+             motionTexture_,motionView_,motionTarget_);
+        make(textureWidth_,textureHeight_,DXGI_FORMAT_B8G8R8A8_UNORM,
+             midpointTexture_,midpointView_,midpointTarget_);
+    }
+    auto draw = [&](ID3D11RenderTargetView* target, ID3D11PixelShader* shader,
+                    unsigned w, unsigned h, ID3D11ShaderResourceView* flow) {
+        context_->ClearState();
+        context_->OMSetRenderTargets(1,&target,nullptr);
+        D3D11_VIEWPORT vp{0,0,static_cast<float>(w),static_cast<float>(h),0,1};
+        context_->RSSetViewports(1,&vp);
+        context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context_->VSSetShader(vertexShader_.Get(),nullptr,0);
+        context_->PSSetShader(shader,nullptr,0);
+        ID3D11ShaderResourceView* views[] = {rgbView_.Get(),nullptr,previousView_.Get(),flow};
+        context_->PSSetShaderResources(0,4,views);
+        ID3D11SamplerState* sampler=sampler_.Get();
+        context_->PSSetSamplers(0,1,&sampler);
+        context_->Draw(3,0);
+    };
+    draw(motionTarget_.Get(),psMotion_.Get(),(textureWidth_+15)/16,(textureHeight_+15)/16,nullptr);
+    draw(midpointTarget_.Get(),psMidpoint_.Get(),textureWidth_,textureHeight_,motionView_.Get());
+    showMidpoint_ = true;
 }
 
 void D3DRenderer::Redraw() {

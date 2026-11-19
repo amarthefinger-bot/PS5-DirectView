@@ -552,6 +552,10 @@ float Ui::DrawVideoTab(float y, Settings& s, const UiInfo& info) {
                   emit(UiCommand::PictureChanged));
 
     // Audio.
+    y = ToggleRow(y, L"FSR 1 spatial upscaling (F6)", L"EASU, active when the image is enlarged", s.fsrUpscaling,
+                  emit(UiCommand::PictureChanged));
+    y = ToggleRow(y, L"30 fps motion interpolation (F7)", L"Experimental: 30 fps inside 60 Hz only; adds delay", s.frameGeneration,
+                  emit(UiCommand::PictureChanged));
     y = SectionTitle(y, L"AUDIO");
     y = ToggleRow(y, L"HDMI audio passthrough", L"Play the capture card's audio on this PC",
                   s.audioEnabled, emit(UiCommand::AudioToggled));

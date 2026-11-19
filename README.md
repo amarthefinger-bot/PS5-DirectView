@@ -8,6 +8,12 @@ It's one exe, around 1 MB. No OBS, no Python, no extra hardware.
 
 ## What it does
 
+Version 1.3 adds experimental 30-in-60 motion interpolation, FSR 1 EASU
+spatial upscaling, and a fix for the macOS fullscreen resize stack overflow.
+See [frame generation controls and limitations](FRAME-GENERATION.md).
+On Windows, use F6 for upscaling and F7 for interpolation; on Mac, use View.
+Interpolation adds delay and does not change the console game's rendering FPS.
+
 **Video**
 - Shows the capture card full screen (or windowed) using Direct3D 11.
 - Always draws the newest frame. There's no frame queue in the app, and V-Sync is off by default.

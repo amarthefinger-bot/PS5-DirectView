@@ -24,6 +24,8 @@ using UiStringT = std::string;
 #endif
 
 struct Settings {
+    bool fsrUpscaling = false;
+    bool frameGeneration = false;
     int sharpLevel = 2;
     int rangeMode = 0;
     bool vsync = false;

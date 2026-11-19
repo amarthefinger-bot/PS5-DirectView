@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Capture.h"
+#include "FrameGeneration.h"
 
 #include <functional>
 #include <memory>
@@ -23,6 +24,10 @@ public:
     void ResetVideo();
     void Render(const VideoFrame& frame);
     void Redraw();
+    void SetFrameGeneration(bool enabled) { if (frameGeneration_ != enabled) { frameGeneration_ = enabled; cadence_.Reset(); } }
+    bool FrameGeneration() const { return frameGeneration_; }
+    void SetFsrUpscaling(bool enabled) { fsrUpscaling_ = enabled; }
+    bool FsrUpscaling() const { return fsrUpscaling_; }
     using OverlayFn = std::function<void(ID2D1DeviceContext*, const D2D1_RECT_F& videoRect)>;
     void SetOverlay(OverlayFn fn) { overlay_ = std::move(fn); }
     ID2D1DeviceContext* D2D() const { return d2d_.Get(); }
@@ -39,6 +44,7 @@ public:
     float Sharpness() const { return sharpness_; }
 
 private:
+    friend struct D3DRendererTestAccess;
     void CreateRenderTarget();
     void EnsureTextures(const FrameFormat& format);
     bool Upload(const VideoFrame& frame);
@@ -46,6 +52,12 @@ private:
     void UpdateParams(const FrameFormat& format);
     void Convert(ID3D11ShaderResourceView* view0, ID3D11ShaderResourceView* view1);
     void Present();
+    void GenerateMidpoint();
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> previousRgb_, motionTexture_, midpointTexture_;
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> previousView_, motionView_, midpointView_;
+    Microsoft::WRL::ComPtr<ID3D11RenderTargetView> motionTarget_, midpointTarget_;
+    Microsoft::WRL::ComPtr<ID3D11PixelShader> psMotion_, psMidpoint_;
+    bool showMidpoint_ = false;
 
     HWND hwnd_ = nullptr;
     unsigned clientWidth_ = 0;
@@ -55,6 +67,9 @@ private:
     PixelFormat texturePixel_ = PixelFormat::BGRA;
     bool textureBt709_ = true;
     bool textureFullRange_ = false;
+    bool fsrUpscaling_ = false;
+    bool frameGeneration_ = false;
+    FrameGenerationCadence cadence_;
     bool hasImage_ = false;
     bool paramsDirty_ = true;
     int rangeOverride_ = 0;
@@ -113,6 +128,10 @@ public:
     void ResetVideo();
     void Render(const VideoFrame& frame);
     void Redraw();
+    void SetFrameGeneration(bool enabled) { if (frameGeneration_ != enabled) { frameGeneration_ = enabled; cadence_.Reset(); } }
+    bool FrameGeneration() const { return frameGeneration_; }
+    void SetFsrUpscaling(bool enabled) { fsrUpscaling_ = enabled; }
+    bool FsrUpscaling() const { return fsrUpscaling_; }
 
     // Mac overlay: free-form draw callback into a CoreGraphics context
     // layered over the Metal swap chain. (See Renderer_Mac.mm for size.)
@@ -136,6 +155,9 @@ private:
     std::unique_ptr<Impl> impl_;
     OverlayFn overlay_;
     float dpi_ = 96.0f;
+    bool fsrUpscaling_ = false;
+    bool frameGeneration_ = false;
+    FrameGenerationCadence cadence_;
     bool hasImage_ = false;
     bool vsync_ = true;
     int rangeOverride_ = 0;

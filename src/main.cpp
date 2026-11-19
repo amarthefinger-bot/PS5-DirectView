@@ -352,6 +352,8 @@ private:
     // ------------------------------------------------------------ settings
 
     void ApplyPicture() {
+        renderer_.SetFsrUpscaling(settings_.fsrUpscaling);
+        renderer_.SetFrameGeneration(settings_.frameGeneration);
         renderer_.SetSharpness(kSharpLevels[settings_.sharpLevel]);
         renderer_.SetRangeOverride(settings_.rangeMode);
         renderer_.SetVSync(settings_.vsync);
@@ -523,7 +525,10 @@ private:
                        measuredInputFps_, pipelineLatencyMs_, appLatencyMs_);
         else
             wcscpy_s(title, L"PS5 DirectView");
-        SetWindowTextW(hwnd_, title);
+        std::wstring displayTitle = title;
+        if (settings_.fsrUpscaling) displayTitle += L" | FSR 1 EASU";
+        if (settings_.frameGeneration) displayTitle += L" | 30-in-60 interpolation (requested)";
+        SetWindowTextW(hwnd_, displayTitle.c_str());
         TryReconnect();
         Redraw();
     }
@@ -648,6 +653,19 @@ private:
                     const auto path = PickFile(hwnd_, L"Video files\0*.mp4;*.mov;*.wmv;*.mkv\0");
                     if (!path.empty()) StartTestFile(path);
                 }
+                return true;
+            case VK_F6:
+                settings_.fsrUpscaling = !settings_.fsrUpscaling;
+                renderer_.SetFsrUpscaling(!renderer_.FsrUpscaling());
+                SetWindowTextW(hwnd_, renderer_.FsrUpscaling()
+                    ? L"PS5 DirectView | FSR 1 EASU: on" : L"PS5 DirectView | FSR 1 EASU: off");
+                Redraw(); return true;
+            case VK_F7:
+                settings_.frameGeneration = !settings_.frameGeneration;
+                renderer_.SetFrameGeneration(!renderer_.FrameGeneration());
+                SetWindowTextW(hwnd_, renderer_.FrameGeneration()
+                    ? L"PS5 DirectView | Motion interpolation: 30-in-60 (experimental)"
+                    : L"PS5 DirectView | Motion interpolation: off");
                 return true;
             case VK_F11: ToggleFullscreen(); return true;
             case VK_ESCAPE:

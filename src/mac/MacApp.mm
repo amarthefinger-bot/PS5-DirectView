@@ -300,10 +300,8 @@ static __weak MacAppDelegate* g_delegate = nil;
     self.overlayView.layer.backgroundColor = [NSColor clearColor].CGColor;
     [content addSubview:self.overlayView];
 
-    // Backing scale -> device pixels for the Metal drawable.
-    const CGFloat scale = self.window.backingScaleFactor;
-    self.metalView.drawableSize = CGSizeMake(content.bounds.size.width * scale,
-                                             content.bounds.size.height * scale);
+    // MetalKit owns drawable sizing, including Retina scale and fullscreen.
+    self.metalView.autoResizeDrawable = YES;
     self.metalView.delegate = self;
     self.metalView.preferredFramesPerSecond = 60;
 
@@ -373,7 +371,11 @@ static __weak MacAppDelegate* g_delegate = nil;
 // ------------ MTKViewDelegate ------------
 
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {
-    _state->renderer->Resize((unsigned)size.width, (unsigned)size.height);
+    // Notification only. Setting drawableSize here re-enters MetalKit's
+    // setter before it has finished, causing unbounded recursion on resize.
+    // Presentation reads the actual drawable dimensions each frame.
+    (void)view;
+    (void)size;
 }
 
 - (void)drawInMTKView:(MTKView*)view {
@@ -558,6 +560,12 @@ static __weak MacAppDelegate* g_delegate = nil;
     [viewMenu addItemWithTitle:@"Cycle Range Mode"
                          action:@selector(menuCycleRange:)
                   keyEquivalent:@""].target = self;
+    [viewMenu addItemWithTitle:@"Motion Interpolation: 30-in-60 (Experimental)"
+                         action:@selector(menuToggleFrameGeneration:)
+                  keyEquivalent:@"g"].target = self;
+    [viewMenu addItemWithTitle:@"FSR 1 Spatial Upscaling (EASU)"
+                         action:@selector(menuToggleFsr:)
+                  keyEquivalent:@"u"].target = self;
     viewItem.submenu = viewMenu;
 
     // Audio menu
@@ -658,6 +666,18 @@ static __weak MacAppDelegate* g_delegate = nil;
     _state->settings.alwaysOnTop = !_state->settings.alwaysOnTop;
     [self applyAlwaysOnTop];
     SaveAppSettings(_state->settings);
+}
+
+- (void)menuToggleFsr:(id)sender {
+    const bool enabled = !_state->renderer->FsrUpscaling();
+    _state->renderer->SetFsrUpscaling(enabled);
+    [(NSMenuItem*)sender setState:enabled ? NSControlStateValueOn : NSControlStateValueOff];
+}
+
+- (void)menuToggleFrameGeneration:(id)sender {
+    const bool enabled = !_state->renderer->FrameGeneration();
+    _state->renderer->SetFrameGeneration(enabled);
+    [(NSMenuItem*)sender setState:enabled ? NSControlStateValueOn : NSControlStateValueOff];
 }
 
 - (void)menuCycleSharp:(id)sender {

@@ -4,6 +4,15 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and attach binaries to
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: write
@@ -13,12 +22,14 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build
-        run: cmake --build build --config Release --parallel --target PS5DirectView InputTests CryptoTests
+        run: cmake --build build --config Release --parallel --target PS5DirectView InputTests CryptoTests FrameGenerationTests
 
       - name: Test
         shell: pwsh
@@ -27,13 +38,15 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           build\Release\CryptoTests.exe
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          build\Release\FrameGenerationTests.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Package
         shell: pwsh
         run: |
-          $name = "PS5DirectView-${{ github.ref_name }}-windows-x64"
+          $name = "PS5DirectView-${{ env.RELEASE_TAG }}-windows-x64"
           New-Item -ItemType Directory $name | Out-Null
-          Copy-Item build\Release\PS5DirectView.exe, README.md, LICENSE $name
+          Copy-Item build\Release\PS5DirectView.exe, README.md, LICENSE, FRAME-GENERATION.md $name
           Copy-Item third_party\README.md "$name\THIRD_PARTY.md"
           Copy-Item test-1080p60.mp4 $name
           Compress-Archive -Path $name -DestinationPath "$name.zip"
@@ -44,14 +57,16 @@ jobs:
         with:
           name: windows-release
           path: |
-            PS5DirectView-${{ github.ref_name }}-windows-x64.zip
-            PS5DirectView-${{ github.ref_name }}-windows-x64.zip.sha256
+            PS5DirectView-${{ env.RELEASE_TAG }}-windows-x64.zip
+            PS5DirectView-${{ env.RELEASE_TAG }}-windows-x64.zip.sha256
           if-no-files-found: error
 
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Install Ninja
         run: brew install ninja
@@ -68,7 +83,7 @@ jobs:
         run: cmake --build build --parallel
 
       - name: Build tests
-        run: cmake --build build --target InputTests CryptoTests --parallel
+        run: cmake --build build --target InputTests CryptoTests FrameGenerationTests --parallel
 
       - name: Input tests
         run: ./build/InputTests
@@ -76,12 +91,15 @@ jobs:
       - name: Crypto tests
         run: ./build/CryptoTests
 
+      - name: Frame generation cadence tests
+        run: ./build/FrameGenerationTests
+
       - name: Package
         run: |
-          name="PS5DirectView-${{ github.ref_name }}-macos-universal"
+          name="PS5DirectView-${{ env.RELEASE_TAG }}-macos-universal"
           mkdir -p "$name"
           /usr/bin/ditto "build/PS5DirectView.app" "$name/PS5DirectView.app"
-          cp README.md LICENSE "$name/"
+          cp README.md LICENSE FRAME-GENERATION.md "$name/"
           cp third_party/README.md "$name/THIRD_PARTY.md"
           cp test-1080p60.mp4 "$name/"
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$name" "$name.zip"
@@ -92,8 +110,8 @@ jobs:
         with:
           name: macos-release
           path: |
-            PS5DirectView-${{ github.ref_name }}-macos-universal.zip
-            PS5DirectView-${{ github.ref_name }}-macos-universal.zip.sha256
+            PS5DirectView-${{ env.RELEASE_TAG }}-macos-universal.zip
+            PS5DirectView-${{ env.RELEASE_TAG }}-macos-universal.zip.sha256
           if-no-files-found: error
 
   publish:
@@ -101,6 +119,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v5
@@ -118,10 +138,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            dist/PS5DirectView-${{ github.ref_name }}-windows-x64.zip \
-            dist/PS5DirectView-${{ github.ref_name }}-windows-x64.zip.sha256 \
-            dist/PS5DirectView-${{ github.ref_name }}-macos-universal.zip \
-            dist/PS5DirectView-${{ github.ref_name }}-macos-universal.zip.sha256 \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --title "$RELEASE_TAG" --notes-file RELEASE-NOTES-v1.3.0.md
+          fi
