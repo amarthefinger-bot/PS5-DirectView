@@ -78,12 +78,16 @@ if(WIN32 AND MSVC)
   target_link_libraries(chiaki_core PUBLIC tp_mbedtls tp_nanopb tp_jerasure
     ws2_32 wsock32 bcrypt iphlpapi)
 elseif(APPLE)
-  # On Darwin clang supports C99 VLAs; also provide BSD socket extras and
-  # suppress chiaki's noisy -Wincompatible-pointer-types / signed warnings.
+  # Darwin clang: force-include alloca.h and alias MSVC's _alloca to POSIX alloca
+  # so the VLA patch (patches/chiaki-msvc-no-vla.patch) compiles unchanged.
+  # Also silence chiaki's -Wincompatible-pointer-types / signed-compare noise.
   target_compile_options(chiaki_core PRIVATE ${TP_C_OPTIONS}
+    -include alloca.h
     -Wno-incompatible-pointer-types -Wno-pointer-sign -Wno-unused-function
-    -Wno-sign-compare -Wno-tautological-pointer-compare)
+    -Wno-sign-compare -Wno-tautological-pointer-compare
+    -Wno-implicit-function-declaration)
   target_compile_definitions(chiaki_core PRIVATE
+    _alloca=alloca
     _DARWIN_UNLIMITED_SELECT=1 __APPLE_USE_RFC_3542=1)
   target_link_libraries(chiaki_core PUBLIC tp_mbedtls tp_nanopb tp_jerasure)
   # Darwin: no bcrypt/iphlpapi; sockets are in libSystem (no explicit link needed).
