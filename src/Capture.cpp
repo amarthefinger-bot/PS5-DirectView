@@ -73,7 +73,8 @@ long long ModeScore(const NativeMode& mode) {
     else if (mode.fps >= 29.0) score += 20'000'000;
     else if (mode.fps >= 24.0) score += 10'000'000;
     else if (mode.fps >= 15.0) score += 5'000'000;
-    if (mode.width == 1920 && mode.height == 1080) score += 1'000'000;
+    if (mode.width == 2560 && mode.height == 1440) score += 2'000'000;
+else if (mode.width == 1920 && mode.height == 1080) score += 1'000'000;
     else if (mode.width == 1280 && mode.height == 720) score += 700'000;
     else if (pixels > 0 && pixels <= 1920LL * 1080)
         score += 200'000 + pixels / 10;
