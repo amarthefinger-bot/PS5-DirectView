@@ -30,6 +30,14 @@ struct VideoDevice {
 
 std::vector<VideoDevice> EnumerateVideoDevices();
 
+// User-requested Windows Media Foundation capture preferences. 0 means Auto.
+// If a combination is unsupported, negotiation safely falls back to Auto.
+struct CapturePreferences {
+    int resolution = 0; // 0 Auto, 1 1080p, 2 1440p, 3 2160p
+    int fps = 0;        // 0 Auto, 1 30, 2 60, 3 120
+    int output = 0;     // 0 Auto, 1 NV12, 2 YUY2 (decoded output format)
+};
+
 enum class PixelFormat { BGRA, YUY2, NV12 };
 
 struct FrameFormat {
@@ -97,7 +105,7 @@ public:
     CaptureService& operator=(const CaptureService&) = delete;
 
     void SetDeviceManager(IMFDXGIDeviceManager* manager) { deviceManager_ = manager; }
-    void Start(std::wstring deviceSymbolicLink);
+    void Start(std::wstring deviceSymbolicLink, CapturePreferences preferences = {});
     void Stop();
     bool TryConsume(VideoFrame& out) { return latest_.Consume(out); }
     std::wstring Status() const;
@@ -106,7 +114,7 @@ public:
     bool Running() const { return running_.load(); }
 
 private:
-    void Worker(std::wstring deviceSymbolicLink);
+    void Worker(std::wstring deviceSymbolicLink, CapturePreferences preferences);
     void SetStatus(const std::wstring& value);
     void SetSignal(const std::wstring& value);
     std::wstring signal_;

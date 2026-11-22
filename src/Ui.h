@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Audio.h"
+#include "Capture.h"
 #include "InputManager.h"
 #include "InputSettings.h"
 #include "RemotePlayClient.h"
@@ -24,6 +25,7 @@ using UiStringT = std::string;
 #endif
 
 struct Settings {
+    CapturePreferences capture;
     bool fsrUpscaling = false;
     bool frameGeneration = false;
     int sharpLevel = 2;
@@ -68,7 +70,7 @@ struct UiInfo {
 };
 
 enum class UiCommand {
-    SelectDevice, RefreshDevices, OpenTestVideo, ToggleFullscreen,
+    SelectDevice, RefreshDevices, CaptureModeChanged, OpenTestVideo, ToggleFullscreen,
     PictureChanged, AudioToggled, AudioOutputChanged, VolumeChanged,
     ChooseOverlayImage, ClearOverlayImage, AlwaysOnTopChanged, OverlaysChanged,
     RpConnect, RpDisconnect, RpDiscover, RpPair, RpForget, InputChanged, CaptureInput,

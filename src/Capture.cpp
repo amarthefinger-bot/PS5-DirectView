@@ -62,7 +62,7 @@ bool IsUncompressed(const GUID& subtype) {
 
 long long ModeScore(const NativeMode& mode) {
     // Low latency matters more than resolution. Frame-rate tier dominates,
-    // then 1080p (what PS5 capture cards deliver), then uncompressed formats,
+    // then preferred resolution (1440p before 1080p), then uncompressed formats,
     // which skip the MJPEG decode step entirely.
     const long long pixels = static_cast<long long>(mode.width) * mode.height;
     long long score = 0;
@@ -74,14 +74,15 @@ long long ModeScore(const NativeMode& mode) {
     else if (mode.fps >= 24.0) score += 10'000'000;
     else if (mode.fps >= 15.0) score += 5'000'000;
     if (mode.width == 2560 && mode.height == 1440) score += 2'000'000;
-else if (mode.width == 1920 && mode.height == 1080) score += 1'000'000;
+    else if (mode.width == 1920 && mode.height == 1080) score += 1'000'000;
     else if (mode.width == 1280 && mode.height == 720) score += 700'000;
     else if (pixels > 0 && pixels <= 1920LL * 1080)
         score += 200'000 + pixels / 10;
     else if (pixels > 0) score += 100'000; // avoid 4K input on cheap adapters
     // Tie-break close modes by nominal FPS, then prefer uncompressed formats.
     score += static_cast<long long>(std::clamp(mode.fps, 0.0, 240.0) * 100.0);
-    if (IsUncompressed(mode.subtype)) score += 500;    if (mode.subtype == MFVideoFormat_NV12 || mode.subtype == MFVideoFormat_YUY2)
+    if (IsUncompressed(mode.subtype)) score += 500;
+    if (mode.subtype == MFVideoFormat_NV12 || mode.subtype == MFVideoFormat_YUY2)
         score += 100; // GPU converts these; RGB32 costs twice the bandwidth.
     return score;
 }
@@ -109,6 +110,24 @@ std::vector<NativeMode> GetModes(IMFSourceReader* reader) {
     std::stable_sort(result.begin(), result.end(),
         [](const NativeMode& a, const NativeMode& b) { return a.score > b.score; });
     return result;
+}
+
+// Frame rates advertised by USB capture devices often use 59.94/29.97 Hz.
+// Treat those as the requested 60/30 Hz, not as incompatible formats.
+bool MatchesCaptureMode(const NativeMode& mode, const CapturePreferences& prefs) {
+    if (prefs.resolution != 0) {
+        const unsigned widths[] = {0, 1920, 2560, 3840};
+        const unsigned heights[] = {0, 1080, 1440, 2160};
+        if (prefs.resolution < 0 || prefs.resolution > 3 ||
+            mode.width != widths[prefs.resolution] ||
+            mode.height != heights[prefs.resolution]) return false;
+    }
+    if (prefs.fps != 0) {
+        const double nominal[] = {0.0, 30.0, 60.0, 120.0};
+        if (prefs.fps < 0 || prefs.fps > 3 ||
+            std::abs(mode.fps - nominal[prefs.fps]) > 1.0) return false;
+    }
+    return true;
 }
 
 const GUID& SubtypeFor(PixelFormat pixel) {
@@ -231,16 +250,26 @@ bool RequestOutput(IMFSourceReader* reader, const GUID& subtype,
 // Output formats to try, cheapest first. RGB32 is the last-resort fallback.
 // Uncompressed sources keep their own layout (no transform at all). For MJPEG,
 // GPU decoders natively write NV12; the CPU decoder natively writes YUY2.
-std::vector<GUID> OutputCandidates(const GUID& nativeSubtype, bool gpu) {
+std::vector<GUID> OutputCandidates(const GUID& nativeSubtype, bool gpu, int wanted) {
     std::vector<GUID> list;
+    if (wanted == 1) list.push_back(MFVideoFormat_NV12);
+    else if (wanted == 2) list.push_back(MFVideoFormat_YUY2);
+    auto add = [&](const GUID& fmt) {
+        if (std::none_of(list.begin(), list.end(),
+                         [&](const GUID& candidate) { return IsEqualGUID(candidate, fmt); }))
+            list.push_back(fmt);
+    };
     if (nativeSubtype == MFVideoFormat_YUY2) {
-        list = {MFVideoFormat_YUY2, MFVideoFormat_NV12};
+        add(MFVideoFormat_YUY2);
+        add(MFVideoFormat_NV12);
     } else if (nativeSubtype == MFVideoFormat_NV12 || gpu) {
-        list = {MFVideoFormat_NV12, MFVideoFormat_YUY2};
+        add(MFVideoFormat_NV12);
+        add(MFVideoFormat_YUY2);
     } else {
-        list = {MFVideoFormat_YUY2, MFVideoFormat_NV12};
+        add(MFVideoFormat_YUY2);
+        add(MFVideoFormat_NV12);
     }
-    list.push_back(MFVideoFormat_RGB32);
+    add(MFVideoFormat_RGB32);
     return list;
 }
 
@@ -248,35 +277,56 @@ std::vector<GUID> OutputCandidates(const GUID& nativeSubtype, bool gpu) {
 // format the renderer understands, preferring the one already in use.
 void RestoreOutput(IMFSourceReader* reader, PixelFormat preferred) {
     if (RequestOutput(reader, SubtypeFor(preferred), nullptr)) return;
-    for (const GUID& subtype : OutputCandidates(GUID_NULL, false))
+    for (const GUID& subtype : OutputCandidates(GUID_NULL, false, 0))
         if (RequestOutput(reader, subtype, nullptr)) return;
     Check(E_FAIL, L"Restore video output type");
 }
 
-FrameFormat Negotiate(IMFSourceReader* reader, bool gpu, GUID& nativeSubtype) {
+// The configured native-mode resolution/FPS and decoded pixel format are
+// deliberately independent: requesting YUY2 output may require conversion.
+FrameFormat Negotiate(IMFSourceReader* reader, bool gpu, GUID& nativeSubtype,
+                      const CapturePreferences& prefs, std::wstring& note) {
     const auto modes = GetModes(reader);
     if (modes.empty()) throw std::runtime_error("Capture device provides no video modes.");
-
     ComPtr<IMFSourceReaderEx> readerEx;
     reader->QueryInterface(IID_PPV_ARGS(&readerEx));
-    for (const auto& native : modes) {
-        // Program the device itself into this mode (resolution, fps, codec),
-        // then negotiate the decoded output separately.
-        DWORD changes = 0;
-        if (!readerEx || FAILED(readerEx->SetNativeMediaType(
-                MF_SOURCE_READER_FIRST_VIDEO_STREAM, native.type.Get(), &changes))) {
-            if (FAILED(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
-                                                   nullptr, native.type.Get()))) continue;
-        }
-        for (const GUID& subtype : OutputCandidates(native.subtype, gpu)) {
-            if (!RequestOutput(reader, subtype, &native)) continue;
-            FrameFormat format;
-            if (ReadOutputFormat(reader, native.fps, native.subtype, format)) {
-                nativeSubtype = native.subtype;
-                return format;
+
+    auto attempt = [&](bool matchedOnly) -> FrameFormat {
+        for (const auto& native : modes) {
+            if (matchedOnly && !MatchesCaptureMode(native, prefs)) continue;
+            // Program the device into a native resolution/rate/codec first.
+            DWORD changes = 0;
+            if (!readerEx || FAILED(readerEx->SetNativeMediaType(
+                    MF_SOURCE_READER_FIRST_VIDEO_STREAM, native.type.Get(), &changes))) {
+                if (FAILED(reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM,
+                                                       nullptr, native.type.Get()))) continue;
+            }
+            for (const GUID& subtype : OutputCandidates(native.subtype, gpu, prefs.output)) {
+                if (!RequestOutput(reader, subtype, &native)) continue;
+                FrameFormat fmt;
+                if (ReadOutputFormat(reader, native.fps, native.subtype, fmt)) {
+                    // Source readers can silently substitute a different output mode.
+                    if (fmt.width != native.width || fmt.height != native.height) continue;
+                    nativeSubtype = native.subtype;
+                    if (prefs.output == 1 && fmt.pixel != PixelFormat::NV12)
+                        note += L"Requested NV12 unavailable; decoded output fallback. ";
+                    else if (prefs.output == 2 && fmt.pixel != PixelFormat::YUY2)
+                        note += L"Requested YUY2 unavailable; decoded output fallback. ";
+                    return fmt;
+                }
             }
         }
+        return {};
+    };
+
+    const bool filtered = prefs.resolution != 0 || prefs.fps != 0;
+    if (filtered) {
+        auto chosen = attempt(true);
+        if (chosen.width) return chosen;
+        note = L"Requested resolution/FPS unavailable; using Auto. ";
     }
+    auto automatic = attempt(false);
+    if (automatic.width) return automatic;
     throw std::runtime_error(
         "Cannot negotiate a video format. Device may lack a compatible MJPEG/YUY2 decoder "
         "or video processor. Try another USB 3.0 port or capture device.");
@@ -290,6 +340,9 @@ std::wstring ShortDescribe(const FrameFormat& format, const GUID& nativeSubtype,
       << (nativeSubtype == MFVideoFormat_MJPG ? L"MJPEG" :
           nativeSubtype == MFVideoFormat_YUY2 ? L"YUY2" :
           nativeSubtype == MFVideoFormat_NV12 ? L"NV12" : L"Video")
+      << L" -> "
+      << (format.pixel == PixelFormat::YUY2 ? L"YUY2" :
+          format.pixel == PixelFormat::NV12 ? L"NV12" : L"RGB32")
       << L"  \x00B7  " << decodePath;
     return s.str();
 }
@@ -388,14 +441,14 @@ std::wstring CaptureService::Status() const {
     return status_;
 }
 
-void CaptureService::Start(std::wstring link) {
+void CaptureService::Start(std::wstring link, CapturePreferences preferences) {
     Stop();
     latest_.Clear();
     framesReceived_ = 0;
     stop_ = false;
     running_ = true;
     SetStatus(L"Opening capture device...");
-    worker_ = std::thread(&CaptureService::Worker, this, std::move(link));
+    worker_ = std::thread(&CaptureService::Worker, this, std::move(link), preferences);
 }
 
 void CaptureService::Stop() {
@@ -407,7 +460,7 @@ void CaptureService::Stop() {
     running_ = false;
 }
 
-void CaptureService::Worker(std::wstring link) {
+void CaptureService::Worker(std::wstring link, CapturePreferences preferences) {
     HRESULT initHr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     if (FAILED(initHr)) {
         SetStatus(L"COM initialization failed: " + HResultText(initHr));
@@ -431,6 +484,8 @@ void CaptureService::Worker(std::wstring link) {
             ComPtr<IMFMediaSource> source;
             GUID nativeSubtype = GUID_NULL;
             FrameFormat format;
+            std::wstring modeNote;
+            if (fileMode) preferences = {}; // test video should always use its actual format
             auto open = [&](bool gpu) {
                 reader.Reset();
                 if (source) { source->Shutdown(); source.Reset(); }
@@ -469,7 +524,8 @@ void CaptureService::Worker(std::wstring link) {
                 reader->SetStreamSelection(MF_SOURCE_READER_ALL_STREAMS, FALSE);
                 Check(reader->SetStreamSelection(MF_SOURCE_READER_FIRST_VIDEO_STREAM, TRUE),
                       L"Select video stream");
-                format = Negotiate(reader.Get(), gpu, nativeSubtype);
+                modeNote.clear();
+                format = Negotiate(reader.Get(), gpu, nativeSubtype, preferences, modeNote);
             };
 
             bool gpu = deviceManager_ != nullptr;
@@ -483,8 +539,9 @@ void CaptureService::Worker(std::wstring link) {
             // GPU-decoded frames come back as IMFDXGIBuffer textures.
             const wchar_t* decodePath = L"starting";
             bool pathKnown = false;
-            SetStatus(Describe(format, nativeSubtype, decodePath, fileMode));
-                            SetSignal(ShortDescribe(format, nativeSubtype, decodePath));
+            SetStatus(modeNote + Describe(format, nativeSubtype, decodePath, fileMode));
+            SetSignal(ShortDescribe(format, nativeSubtype, decodePath) +
+                      (modeNote.empty() ? L"" : L"  | fallback"));
 
             // Decoded file samples can arrive much faster than real-time. Pace
             // them using file timestamps so the FPS counter represents actual
@@ -545,8 +602,9 @@ void CaptureService::Worker(std::wstring link) {
                               L"Read renegotiated video format");
                     }
                     format = changed;
-                    SetStatus(Describe(format, nativeSubtype, decodePath, fileMode));
-                            SetSignal(ShortDescribe(format, nativeSubtype, decodePath));
+                    SetStatus(modeNote + Describe(format, nativeSubtype, decodePath, fileMode));
+                    SetSignal(ShortDescribe(format, nativeSubtype, decodePath) +
+                              (modeNote.empty() ? L"" : L"  | fallback"));
                     // If we changed the reader's output type explicitly,
                     // samples returned during the transition may be in the
                     // old format. Drop this one and read the next sample.
@@ -588,8 +646,9 @@ void CaptureService::Worker(std::wstring link) {
                                 (onGpu ? L"GPU decode" : L"CPU decode") :
                                 (onGpu ? L"GPU upload" : L"no decode");
                             pathKnown = true;
-                            SetStatus(Describe(format, nativeSubtype, decodePath, fileMode));
-                            SetSignal(ShortDescribe(format, nativeSubtype, decodePath));
+                            SetStatus(modeNote + Describe(format, nativeSubtype, decodePath, fileMode));
+                            SetSignal(ShortDescribe(format, nativeSubtype, decodePath) +
+                                      (modeNote.empty() ? L"" : L"  | fallback"));
                         }
                         frame.sample = sample;
                         frame.format = format;

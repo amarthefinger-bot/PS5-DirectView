@@ -101,6 +101,9 @@ void WriteRegString(const wchar_t* name, const std::wstring& value) {
 
 Settings LoadSettings() {
     Settings s;
+    s.capture.resolution = static_cast<int>(std::min<DWORD>(LoadDword(L"CaptureResolution", 0), 3));
+    s.capture.fps = static_cast<int>(std::min<DWORD>(LoadDword(L"CaptureFps", 0), 3));
+    s.capture.output = static_cast<int>(std::min<DWORD>(LoadDword(L"CapturePixel", 0), 2));
     s.sharpLevel = static_cast<int>(std::min<DWORD>(LoadDword(L"Sharpening", 2), 3));
     s.rangeMode = static_cast<int>(std::min<DWORD>(LoadDword(L"Range", 0), 2));
     s.vsync = LoadDword(L"VSync", 0) != 0;
@@ -123,6 +126,9 @@ Settings LoadSettings() {
 }
 
 void SaveSettings(const Settings& s) {
+    SaveDword(L"CaptureResolution", s.capture.resolution);
+    SaveDword(L"CaptureFps", s.capture.fps);
+    SaveDword(L"CapturePixel", s.capture.output);
     SaveDword(L"Sharpening", s.sharpLevel);
     SaveDword(L"Range", s.rangeMode);
     SaveDword(L"VSync", s.vsync);
@@ -331,7 +337,7 @@ private:
         const std::wstring& link = devices_[static_cast<size_t>(index)].symbolicLink;
         // Explicit picks become the new default for next launch.
         if (remember) WriteRegString(L"LastDevice", link);
-        capture_.Start(link);
+        capture_.Start(link, settings_.capture);
         // Card HDMI audio follows the selected video device.
         if (settings_.audioEnabled) audio_.Start(link);
         else audio_.Stop();
@@ -382,6 +388,10 @@ private:
             switch (e.command) {
                 case UiCommand::SelectDevice: ChooseDevice(e.index); break;
                 case UiCommand::RefreshDevices: RefreshDevices(); break;
+                case UiCommand::CaptureModeChanged:
+                    if (testFile_.empty() && selectedDevice_ >= 0)
+                        ChooseDevice(selectedDevice_, false);
+                    break;
                 case UiCommand::OpenTestVideo: {
                     const auto path = PickFile(hwnd_,
                         L"Video files (*.mp4;*.mov;*.wmv;*.mkv)\0*.mp4;*.mov;*.wmv;*.mkv\0All files\0*.*\0");

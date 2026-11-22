@@ -542,6 +542,18 @@ float Ui::DrawVideoTab(float y, Settings& s, const UiInfo& info) {
            emit(UiCommand::OpenTestVideo));
     y += 52;
 
+    // Capture modes (available native device modes are selected by Media Foundation).
+    y = SectionTitle(y, L"CAPTURE MODE");
+    y = Segmented(y, L"Resolution", {L"Auto", L"1080p", L"1440p", L"2160p"},
+                  s.capture.resolution, emit(UiCommand::CaptureModeChanged));
+    y = Segmented(y, L"Frame rate", {L"Auto", L"30", L"60", L"120"},
+                  s.capture.fps, emit(UiCommand::CaptureModeChanged));
+    y = Segmented(y, L"Pixel format (decoded output)", {L"Auto", L"NV12", L"YUY2"},
+                  s.capture.output, emit(UiCommand::CaptureModeChanged));
+    y = Paragraph(y, L"Switching restarts video capture. Unsupported combinations "
+                         L"fall back to Auto; the top-left signal shows the actual mode.",
+                  kSubtle, 50);
+
     // Picture.
     y = SectionTitle(y, L"PICTURE");
     y = Segmented(y, L"Sharpening", {L"Off", L"Low", L"Medium", L"High"}, s.sharpLevel,
