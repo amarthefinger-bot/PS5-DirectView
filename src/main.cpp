@@ -1,5 +1,6 @@
 #include "Audio.h"
 #include "Capture.h"
+#include "FramePacer.h"
 #include "InputManager.h"
 #include "RemotePlayClient.h"
 #include "Renderer.h"
@@ -107,6 +108,7 @@ Settings LoadSettings() {
     s.sharpLevel = static_cast<int>(std::min<DWORD>(LoadDword(L"Sharpening", 2), 3));
     s.rangeMode = static_cast<int>(std::min<DWORD>(LoadDword(L"Range", 0), 2));
     s.vsync = LoadDword(L"VSync", 0) != 0;
+    s.smooth4k30 = LoadDword(L"Smooth4K30", 0) != 0;
     s.audioEnabled = LoadDword(L"Audio", 1) != 0;
     s.audioOutput = ReadRegString(L"AudioOutput");
     s.volume = static_cast<int>(std::min<DWORD>(LoadDword(L"Volume", 100), 100));
@@ -132,6 +134,7 @@ void SaveSettings(const Settings& s) {
     SaveDword(L"Sharpening", s.sharpLevel);
     SaveDword(L"Range", s.rangeMode);
     SaveDword(L"VSync", s.vsync);
+    SaveDword(L"Smooth4K30", s.smooth4k30);
     SaveDword(L"Audio", s.audioEnabled);
     WriteRegString(L"AudioOutput", s.audioOutput);
     SaveDword(L"Volume", s.volume);
@@ -179,6 +182,15 @@ public:
     App() : frameEvent_(CreateEventW(nullptr, FALSE, FALSE, nullptr)),
             capture_(frameEvent_) {
         if (!frameEvent_) throw std::runtime_error("CreateEvent failed.");
+        // One-shot waitable timer for evenly spaced 4K/30 frame presentation.
+        // Prefer the high-resolution timer on Windows 10/11, but allow older
+        // systems to use the regular waitable timer without failing startup.
+        paceTimer_ = CreateWaitableTimerExW(nullptr, nullptr,
+            0x00000002 /* CREATE_WAITABLE_TIMER_HIGH_RESOLUTION */,
+            TIMER_MODIFY_STATE | SYNCHRONIZE);
+        if (!paceTimer_)
+            paceTimer_ = CreateWaitableTimerExW(nullptr, nullptr, 0,
+                TIMER_MODIFY_STATE | SYNCHRONIZE);
     }
     void SetStartupFile(std::wstring path) { startupFile_ = std::move(path); }
 
@@ -190,6 +202,7 @@ public:
         if (cursorHidden_) ClipCursor(nullptr);
         capture_.Stop();
         audio_.Stop();
+        if (paceTimer_) { CancelWaitableTimer(paceTimer_); CloseHandle(paceTimer_); }
         if (frameEvent_) CloseHandle(frameEvent_);
     }
 
@@ -261,11 +274,15 @@ public:
         MSG message{};
         bool quit = false;
         while (!quit) {
+            HANDLE handles[] = {frameEvent_, paceTimer_};
+            const DWORD handleCount = paceTimer_ ? 2u : 1u;
             const DWORD wait = MsgWaitForMultipleObjectsEx(
-                1, &frameEvent_, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                handleCount, handles, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             if (wait == WAIT_OBJECT_0) {
                 OnFrameReady();
-            } else if (wait == WAIT_OBJECT_0 + 1) {
+            } else if (paceTimer_ && wait == WAIT_OBJECT_0 + 1) {
+                OnPaceDeadline();
+            } else if (wait == WAIT_OBJECT_0 + handleCount) {
                 while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
                     if (message.message == WM_QUIT) { quit = true; break; }
                     TranslateMessage(&message);
@@ -287,6 +304,7 @@ private:
                 ? devices_[static_cast<size_t>(selectedDevice_)].symbolicLink : L"";
         if (previous.empty()) previous = ReadRegString(L"LastDevice");
         capture_.Stop();
+        ResetPacing();
         renderer_.ResetVideo();
         frame_ = {};
         lastFrameTick_ = 0;
@@ -324,6 +342,7 @@ private:
         measuredInputFps_ = 0.0;
         lastSequence_ = 0;
         droppedFrames_ = 0;
+        ResetPacing();
     }
 
     void ChooseDevice(int index, bool remember = true) {
@@ -358,6 +377,8 @@ private:
     // ------------------------------------------------------------ settings
 
     void ApplyPicture() {
+        // The interpolator takes ownership of frame cadence. Never pace it.
+        if (!settings_.smooth4k30 || settings_.frameGeneration) ResetPacing();
         renderer_.SetFsrUpscaling(settings_.fsrUpscaling);
         renderer_.SetFrameGeneration(settings_.frameGeneration);
         renderer_.SetSharpness(kSharpLevels[settings_.sharpLevel]);
@@ -483,32 +504,84 @@ private:
         if (rendererReady_ && !VideoFlowing()) renderer_.Redraw();
     }
 
-    void OnFrameReady() {
-        if (capture_.TryConsume(frame_)) {
-            lastFrameTick_ = GetTickCount64();
-            renderer_.Render(frame_);
-            // Two separately measured legs, same QPC clock:
-            //   USB:  driver frame timestamp -> app receives decoded frame
-            //   App:  app receives frame -> Present() returned
-            const LONGLONG presented = MFGetSystemTime();
-            if (frame_.receiveTime > 0) {
-                const double appMs = static_cast<double>(presented - frame_.receiveTime) / 10'000.0;
-                if (appMs >= 0.0 && appMs < 500.0) { appSumMs_ += appMs; ++appSamples_; }
-            }
-            if (frame_.sampleTime > 0 && frame_.receiveTime > 0) {
-                const double usbMs = static_cast<double>(frame_.receiveTime - frame_.sampleTime) / 10'000.0;
-                if (usbMs >= 0.0 && usbMs < 500.0) { latencySumMs_ += usbMs; ++latencySamples_; }
-            }
-            // Frames the capture thread replaced before the UI drew them.
-            if (lastSequence_ && frame_.sequence > lastSequence_ + 1)
-                droppedFrames_ += frame_.sequence - lastSequence_ - 1;
-            lastSequence_ = frame_.sequence;
-            // Hand the capture buffer/decoder surface back immediately.
-            frame_.buffer.Reset();
-            frame_.sample.Reset();
-        } else {
-            Redraw(); // status change while waiting for a signal
+    // The HDMI capture card can deliver 4K/30 at irregular wall-clock times
+    // even while the average input FPS remains 30. Present on a stable grid,
+    // always taking the newest sample; never create synthetic frames.
+    bool Use4kPacing(const FrameFormat& format) const {
+        return settings_.smooth4k30 && paceTimer_ && !settings_.frameGeneration &&
+               format.width == 3840 && format.height == 2160 &&
+               format.fps >= 29.0 && format.fps <= 30.1;
+    }
+
+    void ResetPacing() {
+        paceClock_.Reset();
+        pacedFramePending_ = false;
+        if (paceTimer_) CancelWaitableTimer(paceTimer_);
+    }
+
+    void ArmPaceTimer() {
+        if (!paceTimer_ || !pacedFramePending_ || !paceClock_.Armed()) return;
+        const auto remaining = paceClock_.Remaining(FramePacer::Clock::now());
+        // Windows waitable timers take relative times in 100 ns units.
+        const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(remaining).count();
+        LARGE_INTEGER due{};
+        due.QuadPart = -std::max<LONGLONG>(1, (nanos + 99) / 100);
+        if (!SetWaitableTimer(paceTimer_, &due, 0, nullptr, nullptr, FALSE)) {
+            // Timer failure must never freeze video: use legacy presentation.
+            ResetPacing();
+            PresentVideoFrame();
         }
+    }
+
+    void PresentVideoFrame() {
+        lastFrameTick_ = GetTickCount64();
+        renderer_.Render(frame_);
+        // Keep the same latency / dropped-frame accounting as the original.
+        const LONGLONG presented = MFGetSystemTime();
+        if (frame_.receiveTime > 0) {
+            const double appMs = static_cast<double>(presented - frame_.receiveTime) / 10'000.0;
+            if (appMs >= 0.0 && appMs < 500.0) { appSumMs_ += appMs; ++appSamples_; }
+        }
+        if (frame_.sampleTime > 0 && frame_.receiveTime > 0) {
+            const double usbMs = static_cast<double>(frame_.receiveTime - frame_.sampleTime) / 10'000.0;
+            if (usbMs >= 0.0 && usbMs < 500.0) { latencySumMs_ += usbMs; ++latencySamples_; }
+        }
+        if (lastSequence_ && frame_.sequence > lastSequence_ + 1)
+            droppedFrames_ += frame_.sequence - lastSequence_ - 1;
+        lastSequence_ = frame_.sequence;
+        frame_.buffer.Reset();
+        frame_.sample.Reset();
+        pacedFramePending_ = false;
+    }
+
+    void PresentPacedFrameIfDue() {
+        if (!pacedFramePending_) return;
+        const auto now = FramePacer::Clock::now();
+        if (!paceClock_.Due(now)) { ArmPaceTimer(); return; }
+        PresentVideoFrame();
+        paceClock_.Presented(FramePacer::Clock::now());
+    }
+
+    void OnPaceDeadline() { PresentPacedFrameIfDue(); }
+
+    void OnFrameReady() {
+        VideoFrame incoming;
+        if (!capture_.TryConsume(incoming)) { Redraw(); return; }
+        lastFrameTick_ = GetTickCount64();
+        if (!Use4kPacing(incoming.format)) {
+            ResetPacing();
+            frame_ = std::move(incoming);
+            PresentVideoFrame();
+            return;
+        }
+        const auto now = FramePacer::Clock::now();
+        if (!paceClock_.Armed() || paceClock_.IsStalled(now))
+            paceClock_.Start(incoming.format.fps, now);
+        // Only one frame is queued: stale samples are replaced, not replayed.
+        // This is deliberate: it bounds the additional video latency.
+        frame_ = std::move(incoming);
+        pacedFramePending_ = true;
+        PresentPacedFrameIfDue();
     }
 
     void OnTimer() {
@@ -860,6 +933,9 @@ private:
     std::vector<AudioOutput> outputs_;
     unsigned outputRefresh_ = 0;
     VideoFrame frame_;
+    HANDLE paceTimer_ = nullptr;
+    FramePacer paceClock_;
+    bool pacedFramePending_ = false;
     std::vector<VideoDevice> devices_;
     int selectedDevice_ = -1;
     std::wstring testFile_;

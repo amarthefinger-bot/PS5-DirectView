@@ -31,6 +31,7 @@ struct Settings {
     int sharpLevel = 2;
     int rangeMode = 0;
     bool vsync = false;
+    bool smooth4k30 = false; // optional, experimental presentation pacing
     bool audioEnabled = true;
     UiStringT audioOutput;
     int volume = 100;

@@ -562,6 +562,9 @@ float Ui::DrawVideoTab(float y, Settings& s, const UiInfo& info) {
                   emit(UiCommand::PictureChanged));
     y = ToggleRow(y, L"V-Sync", L"No tearing, but adds up to 1 refresh of delay", s.vsync,
                   emit(UiCommand::PictureChanged));
+    y = ToggleRow(y, L"Smooth 4K / 30 (experimental)",
+                  L"Evenly spaces capture frames; may add delay. No frame generation.",
+                  s.smooth4k30, emit(UiCommand::PictureChanged));
 
     // Audio.
     y = ToggleRow(y, L"FSR 1 spatial upscaling (F6)", L"EASU, active when the image is enlarged", s.fsrUpscaling,
